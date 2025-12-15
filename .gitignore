@@ -1,0 +1,4 @@
+solar-forecast
+*.log
+.DS_Store
+state/
