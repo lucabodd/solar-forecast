@@ -66,10 +66,10 @@ type Config struct {
 	AnalysisWindowEnd   int // hour 0-23
 
 	// Panel configuration
-	RatedCapacityKW    float64
-	PanelEfficiency    float64 // 0-1
-	InverterEfficiency float64 // 0-1
-	TempCoefficient    float64 // % per °C
+	RatedCapacityKW    float64 // Rated output at STC (already includes panel efficiency)
+	PanelEfficiency    float64 // DEPRECATED - not used (rated capacity already accounts for this)
+	InverterEfficiency float64 // DC to AC conversion efficiency (0.95-0.98)
+	TempCoefficient    float64 // Temperature coefficient in % per °C (typically -0.4 to -0.5)
 
 	// Email
 	GmailAppPassword string
@@ -105,6 +105,11 @@ type SolarProduction struct {
 	Hour              time.Time
 	EstimatedOutputKW float64
 	OutputPercentage  float64 // percentage of rated capacity
+
+	// Weather context for email rendering
+	CloudCover  int     // percentage 0-100
+	Temperature float64 // Celsius
+	GHI         float64 // W/m² - for condition determination
 }
 
 // AlertCriteria represents which thresholds were triggered

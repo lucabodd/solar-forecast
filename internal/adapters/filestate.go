@@ -196,12 +196,23 @@ func (f *FileStateAdapter) ShouldSendRecoveryEmail(ctx context.Context) (bool, e
 	}
 
 	// Only send recovery email if alert was previously sent and recovery email hasn't been sent yet
-	if state.AlertSent && !state.RecoveryEmailSent {
-		return true, nil
+	shouldSend := state.AlertSent && !state.RecoveryEmailSent
+
+	f.logger.Debug("Recovery email eligibility check",
+		"alert_sent", state.AlertSent,
+		"recovery_email_sent", state.RecoveryEmailSent,
+		"should_send", shouldSend)
+
+	if !shouldSend {
+		if !state.AlertSent {
+			f.logger.Debug("Recovery email not needed - no alert was triggered")
+		} else if state.RecoveryEmailSent {
+			f.logger.Debug("Recovery email already sent today")
+		}
+		return false, nil
 	}
 
-	f.logger.Debug("Recovery email already sent or no alert was triggered")
-	return false, nil
+	return true, nil
 }
 
 // MarkRecoveryEmailSent marks that recovery email has been sent

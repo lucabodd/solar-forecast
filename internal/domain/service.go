@@ -72,21 +72,29 @@ func (s *SolarForecastService) CheckAndAlert(ctx context.Context) error {
 		// Check if we should send recovery email (conditions have improved)
 		shouldSendRecovery, err := s.stateRepository.ShouldSendRecoveryEmail(ctx)
 		if err != nil {
-			s.logger.Error("Failed to check if recovery email should be sent", "error", err.Error())
+			s.logger.Error("Failed to check recovery email status", "error", err.Error())
 			return err
 		}
-		
+
 		if shouldSendRecovery {
-			s.logger.Info("Sending recovery email as conditions have improved")
+			s.logger.Info("Recovery conditions met - preparing to send recovery email",
+				"reason", "alert_previously_sent_and_conditions_improved")
+
 			if err := s.emailNotifier.SendRecoveryEmail(ctx); err != nil {
 				s.logger.Error("Failed to send recovery email", "error", err.Error())
 				return fmt.Errorf("failed to send recovery email: %w", err)
 			}
+
+			s.logger.Info("Recovery email sent successfully")
+
 			if err := s.stateRepository.MarkRecoveryEmailSent(ctx); err != nil {
 				s.logger.Error("Failed to mark recovery email as sent", "error", err.Error())
 				return fmt.Errorf("failed to mark recovery email sent: %w", err)
 			}
-			s.logger.Info("Recovery email sent successfully")
+
+			s.logger.Info("Recovery email marked as sent in state file")
+		} else {
+			s.logger.Debug("Recovery email not needed")
 		}
 		
 		return nil
@@ -157,24 +165,28 @@ func (s *SolarForecastService) analyzeForecast(forecast *ForecastData) *AlertAna
 	return analysis
 }
 
-// filterAnalysisWindow filters forecast hours to the configured analysis window
+// filterAnalysisWindow filters forecast hours to daylight hours only
+// Uses GHI (Global Horizontal Irradiance) to determine daylight - more accurate than fixed times
+// as it adapts to seasonal changes and actual solar conditions
 func (s *SolarForecastService) filterAnalysisWindow(hours []ForecastHour) []ForecastHour {
 	filtered := []ForecastHour{}
 
-	now := time.Now()
-	startOfDay := time.Date(now.Year(), now.Month(), now.Day(), s.config.AnalysisWindowStart, 0, 0, 0, now.Location())
-	endOfDay := time.Date(now.Year(), now.Month(), now.Day(), s.config.AnalysisWindowEnd, 59, 59, 0, now.Location())
-
-	// Also check next day's window
-	nextStartOfDay := startOfDay.AddDate(0, 0, 1)
-	nextEndOfDay := endOfDay.AddDate(0, 0, 1)
+	// GHI threshold in W/m² to consider as "daylight"
+	// Typically sunrise/sunset has GHI around 50-100 W/m²
+	// We use 50 W/m² as minimum threshold to capture full daylight period
+	const daylightGHIThreshold = 50.0
 
 	for _, hour := range hours {
-		if (hour.Hour.After(startOfDay) && hour.Hour.Before(endOfDay)) ||
-			(hour.Hour.After(nextStartOfDay) && hour.Hour.Before(nextEndOfDay)) {
+		// Include hour if there's meaningful solar radiation
+		if hour.GlobalHorizontalIrradiance >= daylightGHIThreshold {
 			filtered = append(filtered, hour)
 		}
 	}
+
+	s.logger.Debug("Filtered to daylight hours",
+		"total_hours", len(hours),
+		"daylight_hours", len(filtered),
+		"ghi_threshold", daylightGHIThreshold)
 
 	return filtered
 }
@@ -190,6 +202,12 @@ func (s *SolarForecastService) evaluateLowProductionDuration(production []SolarP
 	var currentConsecutiveHours []SolarProduction
 
 	for _, prod := range production {
+		s.logger.Debug("Production hour",
+			"hour", prod.Hour.Format("15:04"),
+			"production_kw", fmt.Sprintf("%.2f", prod.EstimatedOutputKW),
+			"below_threshold", prod.EstimatedOutputKW < s.config.ProductionAlertThresholdKW,
+		)
+
 		if prod.EstimatedOutputKW < s.config.ProductionAlertThresholdKW {
 			// Below threshold
 			if currentConsecutiveCount == 0 {
@@ -230,28 +248,40 @@ func (s *SolarForecastService) evaluateLowProductionDuration(production []SolarP
 
 // calculateSolarProduction estimates solar output for a given hour
 func (s *SolarForecastService) calculateSolarProduction(hour ForecastHour) SolarProduction {
-	prod := SolarProduction{Hour: hour.Hour}
+	prod := SolarProduction{
+		Hour:        hour.Hour,
+		CloudCover:  hour.CloudCover,
+		Temperature: hour.Temperature,
+		GHI:         hour.GlobalHorizontalIrradiance,
+	}
 
-	// Base formula: P_out = P_rated × (GHI/1000) × η_panel × η_inverter × temp_adjustment
-	
+	// Formula: P_out = P_rated × (GHI/1000) × η_inverter × temp_adjustment
+	//
+	// Note: RatedCapacityKW (8.9 kW for 16×560W panels) is the manufacturer's rated
+	// output at STC (Standard Test Conditions: 1000 W/m² irradiance, 25°C, AM1.5 spectrum).
+	// This rating ALREADY includes the panel's conversion efficiency (~20% silicon),
+	// so we only need to adjust for:
+	//   1. Actual irradiance vs reference (GHI/1000)
+	//   2. Inverter losses (DC to AC conversion)
+	//   3. Temperature effects
+	//
+	// GHI (Global Horizontal Irradiance) from Open-Meteo already accounts for
+	// cloud cover, atmospheric conditions, and solar angle.
+	//
+	// Reference GHI is 1000 W/m² (STC)
+
 	// Normalize GHI to reference (1000 W/m²)
 	ghiFactor := hour.GlobalHorizontalIrradiance / 1000.0
 
 	// Temperature adjustment (efficiency decreases with temperature)
 	// Assuming reference temp of 25°C
 	tempAdjustment := 1.0 - (s.config.TempCoefficient / 100.0 * (hour.Temperature - 25.0))
-	
-	// Cloud cover reduces output further (rough approximation)
-	// 100% cloud = 0% output, 0% cloud = 100% output
-	cloudFactor := 1.0 - (float64(hour.CloudCover) / 100.0)
 
-	// Calculate output
-	prod.EstimatedOutputKW = s.config.RatedCapacityKW * 
-		ghiFactor * 
-		s.config.PanelEfficiency * 
-		s.config.InverterEfficiency * 
-		tempAdjustment * 
-		cloudFactor
+	// Calculate output (panel_efficiency removed - already included in rated capacity)
+	prod.EstimatedOutputKW = s.config.RatedCapacityKW *
+		ghiFactor *
+		s.config.InverterEfficiency *
+		tempAdjustment
 
 	// Ensure non-negative
 	if prod.EstimatedOutputKW < 0 {
@@ -281,9 +311,10 @@ func (s *SolarForecastService) generateRecommendation(analysis *AlertAnalysis) s
 	if analysis.CriteriaTriggered.LowProductionDurationTriggered {
 		timeWindow := analysis.FirstLowProductionHour.Format("15:04") + "-" + analysis.LastLowProductionHour.Format("15:04")
 		recommendation := fmt.Sprintf(
-			"⚠️ Solar production will drop below %.1f kW for %d consecutive hours during %s. "+
+			"⚠️ Solar production will drop below %.1f kW for %d consecutive daylight hours during %s. "+
 				"Expect severely limited power output during this period. "+
-				"Consider reducing consumption or activating backup power sources.",
+				"Consider reducing consumption or activating backup power sources. "+
+				"Analysis uses automatic daylight detection based on solar irradiance.",
 			s.config.ProductionAlertThresholdKW,
 			analysis.ConsecutiveHourCount,
 			timeWindow,

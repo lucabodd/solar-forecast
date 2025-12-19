@@ -99,6 +99,8 @@ func LoadConfig(configPath string) (*domain.Config, error) {
 		case "panel_efficiency":
 			if v, err := strconv.ParseFloat(value, 64); err == nil {
 				config.PanelEfficiency = v
+				// Note: This value is deprecated and not used in calculations
+				// The rated capacity already includes panel efficiency
 			}
 		case "inverter_efficiency":
 			if v, err := strconv.ParseFloat(value, 64); err == nil {
