@@ -14,21 +14,23 @@ import (
 
 // GmailAdapter implements EmailNotifier using Gmail SMTP
 type GmailAdapter struct {
-	senderEmail      string
-	senderPassword   string
-	recipientEmail   string
-	logger           domain.Logger
-	alertThresholdKW float64 // Store threshold for color coding in emails
+	senderEmail          string
+	senderPassword       string
+	recipientEmail       string
+	logger               domain.Logger
+	alertThresholdKW     float64 // Store threshold for color coding in emails
+	daylightGHIThreshold float64 // Store GHI threshold for daylight detection
 }
 
 // NewGmailAdapter creates a new Gmail adapter
 func NewGmailAdapter(config *domain.Config, logger domain.Logger) *GmailAdapter {
 	return &GmailAdapter{
-		senderEmail:      config.GmailSender,
-		senderPassword:   config.GmailAppPassword,
-		recipientEmail:   config.RecipientEmail,
-		logger:           logger,
-		alertThresholdKW: config.ProductionAlertThresholdKW,
+		senderEmail:          config.GmailSender,
+		senderPassword:       config.GmailAppPassword,
+		recipientEmail:       config.RecipientEmail,
+		logger:               logger,
+		alertThresholdKW:     config.ProductionAlertThresholdKW,
+		daylightGHIThreshold: config.DaylightGHIThreshold,
 	}
 }
 
@@ -738,8 +740,7 @@ func filterFromNow(hours []domain.SolarProduction, count int) []domain.SolarProd
 }
 
 // calculateSmartSpacing calculates non-uniform X positions that compress nighttime hours
-func calculateSmartSpacing(production []domain.SolarProduction, totalWidth float64) []float64 {
-	const daylightGHIThreshold = 50.0
+func calculateSmartSpacing(production []domain.SolarProduction, totalWidth float64, daylightGHIThreshold float64) []float64 {
 	const nightCompressionFactor = 0.2 // Night hours take 20% of day hour spacing
 
 	// Calculate total "weighted" hours
@@ -887,7 +888,7 @@ func (a *GmailAdapter) generateOutputLineChart(production []domain.SolarProducti
 
 	// Calculate smart point spacing (compress nighttime hours)
 	totalChartWidth := float64(chartWidth - 2*padding)
-	xPositions := calculateSmartSpacing(production, totalChartWidth)
+	xPositions := calculateSmartSpacing(production, totalChartWidth, a.daylightGHIThreshold)
 
 	// Build production path
 	productionPath := fmt.Sprintf("M %d %d", padding, chartHeight-padding)
@@ -962,8 +963,8 @@ func (a *GmailAdapter) generateOutputLineChart(production []domain.SolarProducti
 `, x, y))
 		}
 
-		// Draw label only for daylight hours (GHI >= 50)
-		if production[i].GHI >= 50.0 {
+		// Draw label only for daylight hours
+		if production[i].GHI >= a.daylightGHIThreshold {
 			html.WriteString(fmt.Sprintf(`                    <text class="output-value" x="%.1f" y="%.1f" text-anchor="middle">%.1f kW</text>
 `, x, y-12, point))
 		}
@@ -976,8 +977,8 @@ func (a *GmailAdapter) generateOutputLineChart(production []domain.SolarProducti
 		html.WriteString(fmt.Sprintf(`                    <circle class="cloud-dot" cx="%.1f" cy="%.1f" r="4" />
 `, x, y))
 
-		// Draw label only for daylight hours (GHI >= 50)
-		if production[i].GHI >= 50.0 {
+		// Draw label only for daylight hours
+		if production[i].GHI >= a.daylightGHIThreshold {
 			html.WriteString(fmt.Sprintf(`                    <text class="cloud-value" x="%.1f" y="%.1f" text-anchor="middle">%.0f%%</text>
 `, x, y+18, cloud))
 		}
@@ -989,8 +990,8 @@ func (a *GmailAdapter) generateOutputLineChart(production []domain.SolarProducti
 	for i := 0; i < len(productionPoints); i++ {
 		if i < len(production) {
 			prod := production[i]
-			// Only show time labels during daylight hours (GHI >= 50)
-			if prod.GHI >= 50.0 {
+			// Only show time labels during daylight hours
+			if prod.GHI >= a.daylightGHIThreshold {
 				x := float64(padding) + xPositions[i]
 				timeStr := prod.Hour.Format("15:04")
 				html.WriteString(fmt.Sprintf(`                    <text x="%.1f" y="%.0f" text-anchor="middle" style="font-size: 11px; fill: #2c3e50; font-weight: bold;">%s</text>

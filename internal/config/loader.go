@@ -34,6 +34,7 @@ func LoadConfig(configPath string) (*domain.Config, error) {
 		DurationThresholdHours:     6,
 		AnalysisWindowStart:        10,
 		AnalysisWindowEnd:          16,
+		DaylightGHIThreshold:       50.0,
 		RatedCapacityKW:           5.0,
 		PanelEfficiency:           0.20,
 		InverterEfficiency:        0.97,
@@ -91,6 +92,10 @@ func LoadConfig(configPath string) (*domain.Config, error) {
 		case "analysis_window_end":
 			if v, err := strconv.Atoi(value); err == nil {
 				config.AnalysisWindowEnd = v
+			}
+		case "daylight_ghi_threshold":
+			if v, err := strconv.ParseFloat(value, 64); err == nil {
+				config.DaylightGHIThreshold = v
 			}
 		case "rated_capacity_kw":
 			if v, err := strconv.ParseFloat(value, 64); err == nil {

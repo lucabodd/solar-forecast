@@ -18,23 +18,24 @@ import (
 
 // PushoverAdapter implements PushNotifier using Pushover API
 type PushoverAdapter struct {
-	userKey  string
-	apiToken string
-	logger   domain.Logger
+	userKey              string
+	apiToken             string
+	logger               domain.Logger
+	daylightGHIThreshold float64
 }
 
 // NewPushoverAdapter creates a new Pushover adapter
 func NewPushoverAdapter(config *domain.Config, logger domain.Logger) *PushoverAdapter {
 	return &PushoverAdapter{
-		userKey:  config.PushoverUserKey,
-		apiToken: config.PushoverAPIToken,
-		logger:   logger,
+		userKey:              config.PushoverUserKey,
+		apiToken:             config.PushoverAPIToken,
+		logger:               logger,
+		daylightGHIThreshold: config.DaylightGHIThreshold,
 	}
 }
 
 // calculateSmartSpacingPNG calculates non-uniform X positions that compress nighttime hours for PNG charts
-func calculateSmartSpacingPNG(production []domain.SolarProduction, totalWidth float64) []float64 {
-	const daylightGHIThreshold = 50.0
+func calculateSmartSpacingPNG(production []domain.SolarProduction, totalWidth float64, daylightGHIThreshold float64) []float64 {
 	const nightCompressionFactor = 0.2 // Night hours take 20% of day hour spacing
 
 	// Calculate total "weighted" hours
@@ -141,7 +142,7 @@ func (p *PushoverAdapter) GenerateChartImage(production []domain.SolarProduction
 
 	// Calculate smart point spacing (compress nighttime hours)
 	totalChartWidth := float64(chartWidth - padding)
-	xPositions := calculateSmartSpacingPNG(production, totalChartWidth)
+	xPositions := calculateSmartSpacingPNG(production, totalChartWidth, p.daylightGHIThreshold)
 
 	// Draw production line (orange)
 	dc.SetColor(color.RGBA{247, 147, 30, 255})
@@ -229,8 +230,8 @@ func (p *PushoverAdapter) GenerateChartImage(production []domain.SolarProduction
 			dc.Fill()
 		}
 
-		// Draw value label only for daylight hours (GHI >= 50)
-		if prod.GHI >= 50.0 {
+		// Draw value label only for daylight hours
+		if prod.GHI >= p.daylightGHIThreshold {
 			dc.SetColor(color.RGBA{247, 147, 30, 255})
 			dc.DrawStringAnchored(fmt.Sprintf("%.1f", kw), x, y-10, 0.5, 1)
 		}
@@ -247,8 +248,8 @@ func (p *PushoverAdapter) GenerateChartImage(production []domain.SolarProduction
 		dc.DrawCircle(x, y, 3)
 		dc.Fill()
 
-		// Draw value label only for daylight hours (GHI >= 50)
-		if prod.GHI >= 50.0 {
+		// Draw value label only for daylight hours
+		if prod.GHI >= p.daylightGHIThreshold {
 			dc.DrawStringAnchored(fmt.Sprintf("%.0f%%", cloud), x, y+15, 0.5, 0)
 		}
 	}
@@ -256,8 +257,8 @@ func (p *PushoverAdapter) GenerateChartImage(production []domain.SolarProduction
 	// X-axis labels (time) - daylight hours only
 	dc.SetColor(color.RGBA{44, 62, 80, 255})
 	for i, prod := range production {
-		// Only show time labels during daylight hours (GHI >= 50)
-		if prod.GHI >= 50.0 {
+		// Only show time labels during daylight hours
+		if prod.GHI >= p.daylightGHIThreshold {
 			x := float64(padding) + xPositions[i]
 			timeStr := prod.Hour.Format("15:04")
 			dc.DrawStringAnchored(timeStr, x, float64(padding+chartHeight+35), 0.5, 0)
