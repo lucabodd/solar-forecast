@@ -205,6 +205,18 @@ func (s *SolarForecastService) analyzeForecast(forecast *ForecastData) *AlertAna
 		return analysis
 	}
 
+	// If alert triggered but no recovery found in initial window,
+	// search for recovery in the full 7-day forecast
+	if !analysis.HasRecovery && analysis.CriteriaTriggered.LowProductionDurationTriggered {
+		// Get ALL daylight hours from the full 7-day forecast for recovery search
+		allDaylightHours := s.filterAnalysisWindow(forecast.Hours)
+		allDaylightProduction := make([]SolarProduction, len(allDaylightHours))
+		for i, hour := range allDaylightHours {
+			allDaylightProduction[i] = s.calculateSolarProduction(hour)
+		}
+		s.findRecoveryInExtendedForecast(allDaylightProduction, analysis)
+	}
+
 	// Generate recommendation
 	analysis.RecommendedAction = s.generateRecommendation(analysis)
 
@@ -317,6 +329,29 @@ func (s *SolarForecastService) evaluateLowProductionDuration(production []SolarP
 	}
 }
 
+// findRecoveryInExtendedForecast searches for recovery in the full 7-day forecast
+func (s *SolarForecastService) findRecoveryInExtendedForecast(allDaylightProduction []SolarProduction, analysis *AlertAnalysis) {
+	// Look for the first daylight hour after LastLowProductionHour where production is above threshold
+	for _, prod := range allDaylightProduction {
+		// Only consider hours after the end of the low production period
+		if prod.Hour.After(analysis.LastLowProductionHour) {
+			// Check if production is above threshold and it's daylight (GHI >= 50)
+			if prod.EstimatedOutputKW >= s.config.ProductionAlertThresholdKW && prod.GHI >= 50.0 {
+				analysis.HasRecovery = true
+				analysis.RecoveryHour = prod.Hour
+				analysis.HoursUntilRecovery = int(prod.Hour.Sub(analysis.FirstLowProductionHour).Hours())
+				s.logger.Debug("Recovery found in extended forecast",
+					"recovery_hour", analysis.RecoveryHour.Format("2006-01-02 15:04"),
+					"hours_until_recovery", analysis.HoursUntilRecovery,
+				)
+				return
+			}
+		}
+	}
+
+	s.logger.Debug("No recovery found in 7-day forecast")
+}
+
 // calculateSolarProduction estimates solar output for a given hour
 func (s *SolarForecastService) calculateSolarProduction(hour ForecastHour) SolarProduction {
 	prod := SolarProduction{
@@ -400,13 +435,15 @@ func (s *SolarForecastService) generateRecommendation(analysis *AlertAnalysis) s
 
 // shouldSendAlert checks if alert should be sent based on current state
 func (s *SolarForecastService) shouldSendAlert(ctx context.Context) (bool, error) {
-	// Check if currently in daytime window
+	// Check if currently in daytime window (skip check in test mode)
 	now := time.Now()
-	currentHour := now.Hour()
+	if !s.config.TestMode {
+		currentHour := now.Hour()
 
-	if currentHour < s.config.DaytimeStartHour || currentHour >= s.config.DaytimeEndHour {
-		s.logger.Debug("Outside daytime hours, skipping alert", "hour", currentHour, "start", s.config.DaytimeStartHour, "end", s.config.DaytimeEndHour)
-		return false, nil
+		if currentHour < s.config.DaytimeStartHour || currentHour >= s.config.DaytimeEndHour {
+			s.logger.Debug("Outside daytime hours, skipping alert", "hour", currentHour, "start", s.config.DaytimeStartHour, "end", s.config.DaytimeEndHour)
+			return false, nil
+		}
 	}
 
 	// Check if alert was already sent today
@@ -415,7 +452,6 @@ func (s *SolarForecastService) shouldSendAlert(ctx context.Context) (bool, error
 		return false, err
 	}
 
-	now = time.Now()
 	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
 
 	s.logger.Info("Alert deduplication check", "alert_sent", state.AlertSent, "last_alert_date", state.LastAlertDate.Format("2006-01-02"), "today", today.Format("2006-01-02"))

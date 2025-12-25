@@ -32,13 +32,46 @@ func NewPushoverAdapter(config *domain.Config, logger domain.Logger) *PushoverAd
 	}
 }
 
+// calculateSmartSpacingPNG calculates non-uniform X positions that compress nighttime hours for PNG charts
+func calculateSmartSpacingPNG(production []domain.SolarProduction, totalWidth float64) []float64 {
+	const daylightGHIThreshold = 50.0
+	const nightCompressionFactor = 0.2 // Night hours take 20% of day hour spacing
+
+	// Calculate total "weighted" hours
+	var totalWeightedHours float64
+	for _, prod := range production {
+		if prod.GHI >= daylightGHIThreshold {
+			totalWeightedHours += 1.0 // Full weight for daylight
+		} else {
+			totalWeightedHours += nightCompressionFactor // Compressed weight for night
+		}
+	}
+
+	// Calculate base spacing
+	baseSpacing := totalWidth / totalWeightedHours
+
+	// Calculate cumulative X positions
+	xPositions := make([]float64, len(production))
+	var cumulativeX float64
+	for i, prod := range production {
+		xPositions[i] = cumulativeX
+		if prod.GHI >= daylightGHIThreshold {
+			cumulativeX += baseSpacing
+		} else {
+			cumulativeX += baseSpacing * nightCompressionFactor
+		}
+	}
+
+	return xPositions
+}
+
 // GenerateChartImage creates a PNG image of the production and cloud coverage chart
 func (p *PushoverAdapter) GenerateChartImage(production []domain.SolarProduction) ([]byte, error) {
-	// Sort and filter to next 12 hours from now
+	// Sort and filter to next 48 hours from now
 	sort.Slice(production, func(i, j int) bool {
 		return production[i].Hour.Before(production[j].Hour)
 	})
-	production = filterFromNow(production, 12)
+	production = filterFromNow(production, 48)
 
 	// Debug: log time range
 	if len(production) > 0 {
@@ -106,14 +139,15 @@ func (p *PushoverAdapter) GenerateChartImage(production []domain.SolarProduction
 		dc.DrawStringAnchored(fmt.Sprintf("%.0f%%", value), float64(chartWidth+10), y, 0, 0.5)
 	}
 
-	// Calculate point spacing
-	pointSpacing := float64(chartWidth-padding) / float64(len(production)-1)
+	// Calculate smart point spacing (compress nighttime hours)
+	totalChartWidth := float64(chartWidth - padding)
+	xPositions := calculateSmartSpacingPNG(production, totalChartWidth)
 
 	// Draw production line (orange)
 	dc.SetColor(color.RGBA{247, 147, 30, 255})
 	dc.SetLineWidth(4)
 	for i, prod := range production {
-		x := float64(padding) + float64(i)*pointSpacing
+		x := float64(padding) + xPositions[i]
 		kw := prod.EstimatedOutputKW
 		if kw < 0 {
 			kw = 0
@@ -132,7 +166,7 @@ func (p *PushoverAdapter) GenerateChartImage(production []domain.SolarProduction
 	dc.SetLineWidth(3)
 	dc.SetDash(5, 5)
 	for i, prod := range production {
-		x := float64(padding) + float64(i)*pointSpacing
+		x := float64(padding) + xPositions[i]
 		cloud := float64(prod.CloudCover)
 		y := float64(padding+chartHeight) - (cloud/maxCloud)*float64(chartHeight)
 		if i == 0 {
@@ -144,50 +178,95 @@ func (p *PushoverAdapter) GenerateChartImage(production []domain.SolarProduction
 	dc.Stroke()
 	dc.SetDash() // Reset dash
 
-	// Add data point labels for production (every point)
-	dc.SetColor(color.RGBA{247, 147, 30, 255})
+	// Find minimum production value for highlighting
+	var minProductionValue float64 = 999999
+	minProductionIndices := []int{}
 	for i, prod := range production {
 		kw := prod.EstimatedOutputKW
 		if kw < 0 {
 			kw = 0
 		}
-		x := float64(padding) + float64(i)*pointSpacing
-		y := float64(padding+chartHeight) - (kw/maxProduction)*float64(chartHeight)
-
-		// Draw dot
-		dc.DrawCircle(x, y, 4)
-		dc.Fill()
-
-		// Draw value label above the line
-		dc.DrawStringAnchored(fmt.Sprintf("%.1f", kw), x, y-10, 0.5, 1)
+		if kw < minProductionValue {
+			minProductionValue = kw
+			minProductionIndices = []int{i}
+		} else if kw == minProductionValue {
+			minProductionIndices = append(minProductionIndices, i)
+		}
 	}
 
-	// Add data point labels for cloud coverage (every point)
+	// Add data point labels for production
+	for i, prod := range production {
+		kw := prod.EstimatedOutputKW
+		if kw < 0 {
+			kw = 0
+		}
+		x := float64(padding) + xPositions[i]
+		y := float64(padding+chartHeight) - (kw/maxProduction)*float64(chartHeight)
+
+		// Check if this is a minimum point
+		isMinimum := false
+		for _, minIdx := range minProductionIndices {
+			if i == minIdx {
+				isMinimum = true
+				break
+			}
+		}
+
+		// Draw dot with highlighting for minimum
+		if isMinimum {
+			dc.SetColor(color.RGBA{231, 76, 60, 255})   // Red
+			dc.DrawCircle(x, y, 8)
+			dc.Fill()
+			dc.SetColor(color.RGBA{192, 57, 43, 255})   // Dark red border
+			dc.DrawCircle(x, y, 8)
+			dc.SetLineWidth(2)
+			dc.Stroke()
+			dc.SetLineWidth(4) // Reset
+			dc.SetColor(color.RGBA{247, 147, 30, 255}) // Reset to orange
+		} else {
+			dc.SetColor(color.RGBA{247, 147, 30, 255})
+			dc.DrawCircle(x, y, 4)
+			dc.Fill()
+		}
+
+		// Draw value label only for daylight hours (GHI >= 50)
+		if prod.GHI >= 50.0 {
+			dc.SetColor(color.RGBA{247, 147, 30, 255})
+			dc.DrawStringAnchored(fmt.Sprintf("%.1f", kw), x, y-10, 0.5, 1)
+		}
+	}
+
+	// Add data point labels for cloud coverage
 	dc.SetColor(color.RGBA{52, 152, 219, 255})
 	for i, prod := range production {
 		cloud := float64(prod.CloudCover)
-		x := float64(padding) + float64(i)*pointSpacing
+		x := float64(padding) + xPositions[i]
 		y := float64(padding+chartHeight) - (cloud/maxCloud)*float64(chartHeight)
 
 		// Draw dot
 		dc.DrawCircle(x, y, 3)
 		dc.Fill()
 
-		// Draw value label below the line
-		dc.DrawStringAnchored(fmt.Sprintf("%.0f%%", cloud), x, y+15, 0.5, 0)
+		// Draw value label only for daylight hours (GHI >= 50)
+		if prod.GHI >= 50.0 {
+			dc.DrawStringAnchored(fmt.Sprintf("%.0f%%", cloud), x, y+15, 0.5, 0)
+		}
 	}
 
-	// X-axis labels (time) - show every hour
+	// X-axis labels (time) - daylight hours only
 	dc.SetColor(color.RGBA{44, 62, 80, 255})
 	for i, prod := range production {
-		x := float64(padding) + float64(i)*pointSpacing
-		timeStr := prod.Hour.Format("15:04")
-		dc.DrawStringAnchored(timeStr, x, float64(padding+chartHeight+35), 0.5, 0)
+		// Only show time labels during daylight hours (GHI >= 50)
+		if prod.GHI >= 50.0 {
+			x := float64(padding) + xPositions[i]
+			timeStr := prod.Hour.Format("15:04")
+			dc.DrawStringAnchored(timeStr, x, float64(padding+chartHeight+35), 0.5, 0)
+		}
 	}
 
 	// Title
 	dc.SetColor(color.RGBA{44, 62, 80, 255})
-	dc.DrawStringAnchored("Solar Production & Cloud Coverage (Next 12h)", float64(width/2), 25, 0.5, 0.5)
+	dc.DrawStringAnchored("Solar Production & Cloud Coverage (Next 48h)", float64(width/2), 25, 0.5, 0.5)
 
 	// Legend
 	dc.SetColor(color.RGBA{247, 147, 30, 255})

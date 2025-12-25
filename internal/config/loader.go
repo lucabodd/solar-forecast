@@ -171,6 +171,7 @@ func LoadConfig(configPath string) (*domain.Config, error) {
 func applyEnvOverrides(config *domain.Config) {
 	// Test mode override (for make mail command)
 	if os.Getenv("SOLAR_TEST_MODE") == "1" {
+		config.TestMode = true
 		config.ProductionAlertThresholdKW = 5.0
 		config.DurationThresholdHours = 1
 		fmt.Println("[TEST MODE] Using lowered thresholds: 5.0 kW, 1 hour")

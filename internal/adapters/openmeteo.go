@@ -44,10 +44,10 @@ func NewOpenMeteoAdapter(config *domain.Config, logger domain.Logger) *OpenMeteo
 	}
 }
 
-// GetForecast fetches 48-hour weather forecast from Open-Meteo API with retries
+// GetForecast fetches 7-day weather forecast from Open-Meteo API with retries
 func (a *OpenMeteoAdapter) GetForecast(ctx context.Context, latitude, longitude float64) (*domain.ForecastData, error) {
 	url := fmt.Sprintf(
-		"https://api.open-meteo.com/v1/forecast?latitude=%.2f&longitude=%.2f&hourly=temperature_2m,cloud_cover,shortwave_radiation,relative_humidity_2m&forecast_days=2&timezone=auto",
+		"https://api.open-meteo.com/v1/forecast?latitude=%.2f&longitude=%.2f&hourly=temperature_2m,cloud_cover,shortwave_radiation,relative_humidity_2m&forecast_days=7&timezone=auto",
 		latitude, longitude,
 	)
 
@@ -127,7 +127,7 @@ func (a *OpenMeteoAdapter) buildForecastData(apiResp OpenMeteoResponse) (*domain
 		minLen = len(apiResp.Hourly.RelativeHumidity2m)
 	}
 
-	for i := 0; i < minLen && i < 48; i++ { // Limit to 48 hours
+	for i := 0; i < minLen && i < 168; i++ { // Limit to 168 hours (7 days)
 		hour, err := time.Parse("2006-01-02T15:04", apiResp.Hourly.Time[i])
 		if err != nil {
 			a.logger.Error("Failed to parse time", "time_string", apiResp.Hourly.Time[i], "error", err.Error())

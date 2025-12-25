@@ -94,6 +94,9 @@ type Config struct {
 	APIRetryAttempts     int
 	APIRetryDelaySeconds int
 	APITimeoutSeconds    int
+
+	// Testing
+	TestMode bool // When true, bypasses daytime check for notifications
 }
 
 // ForecastHour represents one hour of forecast data

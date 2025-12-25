@@ -374,11 +374,10 @@ func (a *GmailAdapter) generateHTMLBody(analysis *domain.AlertAnalysis) string {
         <div class="content">
             <div class="alert-banner">
                 <h2>⚠️ Low Solar Production Forecasted</h2>
-                <p>Production forecasted below ` + fmt.Sprintf("%.1f kW for %d consecutive hours (%s to %s)",
+                <p>Production forecasted below ` + fmt.Sprintf("%.1f kW for %d consecutive daylight hours starting %s",
 					a.alertThresholdKW,
 					analysis.ConsecutiveHourCount,
-					analysis.FirstLowProductionHour.Format("15:04"),
-					analysis.LastLowProductionHour.Format("15:04")) + `. Please review the forecast data below.</p>
+					analysis.FirstLowProductionHour.Format("Mon Jan 2, 15:04")) + `. Please review the forecast data below.</p>
             </div>
 
             <div class="metrics">
@@ -401,23 +400,44 @@ func (a *GmailAdapter) generateHTMLBody(analysis *domain.AlertAnalysis) string {
 `)
 	}
 
-	html.WriteString(fmt.Sprintf(`
+	// Recovery forecast metric
+	if analysis.HasRecovery {
+		// Calculate days until recovery
+		now := time.Now()
+		daysUntilRecovery := int(analysis.RecoveryHour.Sub(now).Hours() / 24)
+
+		var recoveryText string
+		if daysUntilRecovery == 0 {
+			recoveryText = analysis.RecoveryHour.Format("Today 15:04")
+		} else if daysUntilRecovery == 1 {
+			recoveryText = analysis.RecoveryHour.Format("Tomorrow 15:04")
+		} else {
+			recoveryText = analysis.RecoveryHour.Format("Mon Jan 2, 15:04")
+		}
+
+		html.WriteString(fmt.Sprintf(`
                 <div class="metric">
-                    <div class="metric-label">⏰ Low Production Period</div>
-                    <div class="metric-value large">%s-%s</div>
+                    <div class="metric-label">🌤️ Expected Recovery</div>
+                    <div class="metric-value large">%s</div>
                 </div>
             </div>
-`, analysis.FirstLowProductionHour.Format("15:04"), analysis.LastLowProductionHour.Format("15:04")))
+`, recoveryText))
+	} else {
+		html.WriteString(`
+                <div class="metric">
+                    <div class="metric-label">🌤️ Expected Recovery</div>
+                    <div class="metric-value">No recovery<br/>in 7 days</div>
+                </div>
+            </div>
+`)
+	}
 
 	// Solar production & cloud coverage chart - showing next 12 hours from now
 	if len(analysis.AllProductionHours) > 0 {
 		html.WriteString(a.generateOutputLineChart(analysis.AllProductionHours))
 	}
 
-	// Hourly weather conditions table - show ALL hours with color coding
-	if len(analysis.AllProductionHours) > 0 {
-		html.WriteString(a.generateWeatherConditionsTable(analysis.AllProductionHours))
-	}
+	// Hourly weather conditions table removed as requested
 
 	// Recovery forecast section
 	html.WriteString(a.generateRecoverySection(analysis))
@@ -717,6 +737,39 @@ func filterFromNow(hours []domain.SolarProduction, count int) []domain.SolarProd
 	return filtered
 }
 
+// calculateSmartSpacing calculates non-uniform X positions that compress nighttime hours
+func calculateSmartSpacing(production []domain.SolarProduction, totalWidth float64) []float64 {
+	const daylightGHIThreshold = 50.0
+	const nightCompressionFactor = 0.2 // Night hours take 20% of day hour spacing
+
+	// Calculate total "weighted" hours
+	var totalWeightedHours float64
+	for _, prod := range production {
+		if prod.GHI >= daylightGHIThreshold {
+			totalWeightedHours += 1.0 // Full weight for daylight
+		} else {
+			totalWeightedHours += nightCompressionFactor // Compressed weight for night
+		}
+	}
+
+	// Calculate base spacing
+	baseSpacing := totalWidth / totalWeightedHours
+
+	// Calculate cumulative X positions
+	xPositions := make([]float64, len(production))
+	var cumulativeX float64
+	for i, prod := range production {
+		xPositions[i] = cumulativeX
+		if prod.GHI >= daylightGHIThreshold {
+			cumulativeX += baseSpacing
+		} else {
+			cumulativeX += baseSpacing * nightCompressionFactor
+		}
+	}
+
+	return xPositions
+}
+
 // generateOutputLineChart generates a dual-axis SVG chart with production (kW) and cloud coverage (%)
 func (a *GmailAdapter) generateOutputLineChart(production []domain.SolarProduction) string {
 	var html strings.Builder
@@ -726,8 +779,8 @@ func (a *GmailAdapter) generateOutputLineChart(production []domain.SolarProducti
 		return production[i].Hour.Before(production[j].Hour)
 	})
 
-	// Filter to next 12 hours from current time
-	production = filterFromNow(production, 12)
+	// Filter to next 48 hours from current time
+	production = filterFromNow(production, 48)
 
 	// Debug: log time range
 	if a.logger != nil && len(production) > 0 {
@@ -747,15 +800,12 @@ func (a *GmailAdapter) generateOutputLineChart(production []domain.SolarProducti
 	padding := 60
 	rightPadding := 80 // Extra padding for right Y-axis
 
-	// Create production data (hourly kW values)
+	// Create production data (hourly kW values) - up to 48 hours
 	var productionPoints []float64
 	var maxProduction float64
 	var cloudPoints []float64
 
-	for i, prod := range production {
-		if i >= 12 {
-			break
-		}
+	for _, prod := range production {
 		kw := prod.EstimatedOutputKW
 		if kw < 0 {
 			kw = 0
@@ -780,7 +830,7 @@ func (a *GmailAdapter) generateOutputLineChart(production []domain.SolarProducti
 
 	html.WriteString(`
             <div class="chart-section">
-                <div class="chart-title">⚡ Solar Production & Cloud Coverage Forecast (Next 12 Hours)</div>
+                <div class="chart-title">⚡ Solar Production & Cloud Coverage Forecast (Next 48 Hours)</div>
                 <svg viewBox="0 0 ` + fmt.Sprintf("%d %d", chartWidth+rightPadding, chartHeight) + `" xmlns="http://www.w3.org/2000/svg">
                     <defs>
                         <linearGradient id="outputGradient" x1="0%" y1="0%" x2="0%" y2="100%">
@@ -835,8 +885,9 @@ func (a *GmailAdapter) generateOutputLineChart(production []domain.SolarProducti
 `, chartWidth-padding+10, y+4, valueRight))
 	}
 
-	// Calculate point spacing
-	pointSpacing := float64(chartWidth-2*padding) / float64(len(productionPoints)-1)
+	// Calculate smart point spacing (compress nighttime hours)
+	totalChartWidth := float64(chartWidth - 2*padding)
+	xPositions := calculateSmartSpacing(production, totalChartWidth)
 
 	// Build production path
 	productionPath := fmt.Sprintf("M %d %d", padding, chartHeight-padding)
@@ -844,18 +895,18 @@ func (a *GmailAdapter) generateOutputLineChart(production []domain.SolarProducti
 	areaPath.WriteString(fmt.Sprintf("M %d %d", padding, chartHeight-padding))
 
 	for i, point := range productionPoints {
-		x := float64(padding) + float64(i)*pointSpacing
+		x := float64(padding) + xPositions[i]
 		y := float64(chartHeight-padding) - ((point-minProduction)/(maxProduction-minProduction))*float64(chartHeight-2*padding)
 		productionPath += fmt.Sprintf(" L %.1f %.1f", x, y)
 		areaPath.WriteString(fmt.Sprintf(" L %.1f %.1f", x, y))
 	}
 
-	areaPath.WriteString(fmt.Sprintf(" L %d %d Z", chartWidth-padding, chartHeight-padding))
+	areaPath.WriteString(fmt.Sprintf(" L %.1f %d Z", float64(padding)+xPositions[len(xPositions)-1], chartHeight-padding))
 
 	// Build cloud coverage path (using right Y-axis scale)
 	cloudPath := ""
 	for i, cloud := range cloudPoints {
-		x := float64(padding) + float64(i)*pointSpacing
+		x := float64(padding) + xPositions[i]
 		y := float64(chartHeight-padding) - ((cloud-minCloud)/(maxCloud-minCloud))*float64(chartHeight-2*padding)
 		if i == 0 {
 			cloudPath = fmt.Sprintf("M %.1f %.1f", x, y)
@@ -876,36 +927,75 @@ func (a *GmailAdapter) generateOutputLineChart(production []domain.SolarProducti
 	html.WriteString(fmt.Sprintf(`                    <path class="cloud-line" d="%s" />
 `, cloudPath))
 
+	// Find minimum production value for highlighting
+	minProductionValue := productionPoints[0]
+	minProductionIndices := []int{0}
+	for i, kw := range productionPoints {
+		if kw < minProductionValue {
+			minProductionValue = kw
+			minProductionIndices = []int{i}
+		} else if kw == minProductionValue && i > 0 {
+			minProductionIndices = append(minProductionIndices, i)
+		}
+	}
+
 	// Add production points and labels
 	for i, point := range productionPoints {
-		x := float64(padding) + float64(i)*pointSpacing
+		x := float64(padding) + xPositions[i]
 		y := float64(chartHeight-padding) - ((point-minProduction)/(maxProduction-minProduction))*float64(chartHeight-2*padding)
-		html.WriteString(fmt.Sprintf(`                    <circle class="output-dot" cx="%.1f" cy="%.1f" r="5" />
+
+		// Check if this is a minimum point
+		isMinimum := false
+		for _, minIdx := range minProductionIndices {
+			if i == minIdx {
+				isMinimum = true
+				break
+			}
+		}
+
+		// Draw dot with highlighting for minimum
+		if isMinimum {
+			html.WriteString(fmt.Sprintf(`                    <circle cx="%.1f" cy="%.1f" r="8" fill="#E74C3C" stroke="#C0392B" stroke-width="2" />
 `, x, y))
-		html.WriteString(fmt.Sprintf(`                    <text class="output-value" x="%.1f" y="%.1f" text-anchor="middle">%.1f kW</text>
+		} else {
+			html.WriteString(fmt.Sprintf(`                    <circle class="output-dot" cx="%.1f" cy="%.1f" r="5" />
+`, x, y))
+		}
+
+		// Draw label only for daylight hours (GHI >= 50)
+		if production[i].GHI >= 50.0 {
+			html.WriteString(fmt.Sprintf(`                    <text class="output-value" x="%.1f" y="%.1f" text-anchor="middle">%.1f kW</text>
 `, x, y-12, point))
+		}
 	}
 
 	// Add cloud coverage dots and labels
 	for i, cloud := range cloudPoints {
-		x := float64(padding) + float64(i)*pointSpacing
+		x := float64(padding) + xPositions[i]
 		y := float64(chartHeight-padding) - ((cloud-minCloud)/(maxCloud-minCloud))*float64(chartHeight-2*padding)
 		html.WriteString(fmt.Sprintf(`                    <circle class="cloud-dot" cx="%.1f" cy="%.1f" r="4" />
 `, x, y))
-		html.WriteString(fmt.Sprintf(`                    <text class="cloud-value" x="%.1f" y="%.1f" text-anchor="middle">%.0f%%</text>
+
+		// Draw label only for daylight hours (GHI >= 50)
+		if production[i].GHI >= 50.0 {
+			html.WriteString(fmt.Sprintf(`                    <text class="cloud-value" x="%.1f" y="%.1f" text-anchor="middle">%.0f%%</text>
 `, x, y+18, cloud))
+		}
 	}
 
-	// Add x-axis labels (time) - every hour
+	// Add x-axis labels (time) - daylight hours only
 	html.WriteString(`                    <!-- X-axis labels -->
 `)
 	for i := 0; i < len(productionPoints); i++ {
 		if i < len(production) {
-			x := float64(padding) + float64(i)*pointSpacing
 			prod := production[i]
-			timeStr := prod.Hour.Format("15:04")
-			html.WriteString(fmt.Sprintf(`                    <text x="%.1f" y="%.0f" text-anchor="middle" style="font-size: 11px; fill: #2c3e50; font-weight: bold;">%s</text>
+			// Only show time labels during daylight hours (GHI >= 50)
+			if prod.GHI >= 50.0 {
+				x := float64(padding) + xPositions[i]
+				timeStr := prod.Hour.Format("15:04")
+				html.WriteString(fmt.Sprintf(`                    <text x="%.1f" y="%.0f" text-anchor="middle" style="font-size: 11px; fill: #2c3e50; font-weight: bold;">%s</text>
 `, x, float64(chartHeight-padding+30), timeStr))
+			}
 		}
 	}
 
