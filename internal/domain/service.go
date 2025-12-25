@@ -229,14 +229,9 @@ func (s *SolarForecastService) analyzeForecast(forecast *ForecastData) *AlertAna
 func (s *SolarForecastService) filterAnalysisWindow(hours []ForecastHour) []ForecastHour {
 	filtered := []ForecastHour{}
 
-	// GHI threshold in W/m² to consider as "daylight"
-	// Typically sunrise/sunset has GHI around 50-100 W/m²
-	// We use 50 W/m² as minimum threshold to capture full daylight period
-	const daylightGHIThreshold = 50.0
-
 	for _, hour := range hours {
 		// Include hour if there's meaningful solar radiation
-		if hour.GlobalHorizontalIrradiance >= daylightGHIThreshold {
+		if hour.GlobalHorizontalIrradiance >= s.config.DaylightGHIThreshold {
 			filtered = append(filtered, hour)
 		}
 	}
@@ -244,7 +239,7 @@ func (s *SolarForecastService) filterAnalysisWindow(hours []ForecastHour) []Fore
 	s.logger.Debug("Filtered to daylight hours",
 		"total_hours", len(hours),
 		"daylight_hours", len(filtered),
-		"ghi_threshold", daylightGHIThreshold)
+		"ghi_threshold", s.config.DaylightGHIThreshold)
 
 	return filtered
 }
@@ -288,8 +283,8 @@ func (s *SolarForecastService) evaluateLowProductionDuration(production []SolarP
 			// Above threshold - RECOVERY DETECTED
 
 			// If we just ended the max consecutive streak, capture recovery
-			// Only count as recovery if GHI >= 50 W/m² (still daylight, not sunset)
-			if currentConsecutiveCount > 0 && currentConsecutiveCount == maxConsecutiveCount && prod.GHI >= 50.0 {
+			// Only count as recovery if GHI threshold is met (still daylight, not sunset)
+			if currentConsecutiveCount > 0 && currentConsecutiveCount == maxConsecutiveCount && prod.GHI >= s.config.DaylightGHIThreshold {
 				recoveryHour = prod.Hour
 				maxStreakRecovered = true
 				s.logger.Debug("Recovery detected",
@@ -335,8 +330,8 @@ func (s *SolarForecastService) findRecoveryInExtendedForecast(allDaylightProduct
 	for _, prod := range allDaylightProduction {
 		// Only consider hours after the end of the low production period
 		if prod.Hour.After(analysis.LastLowProductionHour) {
-			// Check if production is above threshold and it's daylight (GHI >= 50)
-			if prod.EstimatedOutputKW >= s.config.ProductionAlertThresholdKW && prod.GHI >= 50.0 {
+			// Check if production is above threshold and it's daylight
+			if prod.EstimatedOutputKW >= s.config.ProductionAlertThresholdKW && prod.GHI >= s.config.DaylightGHIThreshold {
 				analysis.HasRecovery = true
 				analysis.RecoveryHour = prod.Hour
 				analysis.HoursUntilRecovery = int(prod.Hour.Sub(analysis.FirstLowProductionHour).Hours())

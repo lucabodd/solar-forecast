@@ -71,6 +71,9 @@ type Config struct {
 	AnalysisWindowStart int // hour 0-23
 	AnalysisWindowEnd   int // hour 0-23
 
+	// Daylight detection
+	DaylightGHIThreshold float64 // GHI threshold in W/m² to consider as daylight (typically 50-100)
+
 	// Panel configuration
 	RatedCapacityKW    float64 // Rated output at STC (already includes panel efficiency)
 	PanelEfficiency    float64 // DEPRECATED - not used (rated capacity already accounts for this)
