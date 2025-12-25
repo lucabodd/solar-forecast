@@ -11,6 +11,7 @@ type SolarForecastService struct {
 	config              *Config
 	weatherProvider     WeatherForecastProvider
 	emailNotifier       EmailNotifier
+	pushNotifier        PushNotifier
 	stateRepository     AlertStateRepository
 	logger              Logger
 }
@@ -20,6 +21,7 @@ func NewSolarForecastService(
 	config *Config,
 	weatherProvider WeatherForecastProvider,
 	emailNotifier EmailNotifier,
+	pushNotifier PushNotifier,
 	stateRepository AlertStateRepository,
 	logger Logger,
 ) *SolarForecastService {
@@ -27,6 +29,7 @@ func NewSolarForecastService(
 		config:          config,
 		weatherProvider: weatherProvider,
 		emailNotifier:   emailNotifier,
+		pushNotifier:    pushNotifier,
 		stateRepository: stateRepository,
 		logger:          logger,
 	}
@@ -118,6 +121,42 @@ func (s *SolarForecastService) CheckAndAlert(ctx context.Context) error {
 		return fmt.Errorf("failed to send alert: %w", err)
 	}
 
+	// Send push notification with chart if configured
+	if s.pushNotifier != nil {
+		title := "⚠️ Solar Production Alert"
+		message := fmt.Sprintf("Low production: %d hours below %.1f kW\n%s-%s",
+			analysis.ConsecutiveHourCount,
+			s.config.ProductionAlertThresholdKW,
+			analysis.FirstLowProductionHour.Format("15:04"),
+			analysis.LastLowProductionHour.Format("15:04"))
+
+		if analysis.HasRecovery {
+			message += fmt.Sprintf("\n\nRecovery expected at %s (%d hours)",
+				analysis.RecoveryHour.Format("15:04"),
+				analysis.HoursUntilRecovery)
+		}
+
+		// Generate chart image if adapter supports it
+		var chartImage []byte
+		if chartGenerator, ok := s.pushNotifier.(interface {
+			GenerateChartImage([]SolarProduction) ([]byte, error)
+		}); ok {
+			var err error
+			chartImage, err = chartGenerator.GenerateChartImage(analysis.AllProductionHours)
+			if err != nil {
+				s.logger.Warn("Failed to generate chart image for push notification", "error", err.Error())
+				// Continue without image
+			} else {
+				s.logger.Info("Generated chart image for push notification", "size_bytes", len(chartImage))
+			}
+		}
+
+		if err := s.pushNotifier.SendNotification(ctx, title, message, chartImage); err != nil {
+			s.logger.Warn("Failed to send push notification", "error", err.Error())
+			// Don't fail the whole operation if push fails
+		}
+	}
+
 	// Mark alert as sent
 	if err := s.stateRepository.MarkAlertSent(ctx); err != nil {
 		s.logger.Error("Failed to mark alert as sent", "error", err.Error())
@@ -134,7 +173,14 @@ func (s *SolarForecastService) analyzeForecast(forecast *ForecastData) *AlertAna
 		LowProductionHours: []SolarProduction{},
 	}
 
-	// Filter hours to analysis window
+	// Calculate production for ALL hours (for chart display - shows night hours too)
+	allProductionData := make([]SolarProduction, len(forecast.Hours))
+	for i, hour := range forecast.Hours {
+		allProductionData[i] = s.calculateSolarProduction(hour)
+	}
+	analysis.AllProductionHours = allProductionData
+
+	// Filter hours to daylight analysis window
 	windowHours := s.filterAnalysisWindow(forecast.Hours)
 	if len(windowHours) == 0 {
 		s.logger.Warn("No hours in analysis window")
@@ -142,13 +188,13 @@ func (s *SolarForecastService) analyzeForecast(forecast *ForecastData) *AlertAna
 		return analysis
 	}
 
-	// Calculate solar production for each hour
+	// Calculate solar production for daylight hours only (for alert analysis)
 	productionData := make([]SolarProduction, len(windowHours))
 	for i, hour := range windowHours {
 		productionData[i] = s.calculateSolarProduction(hour)
 	}
 
-	// Evaluate low production duration criterion
+	// Evaluate low production duration criterion (using daylight hours only)
 	s.evaluateLowProductionDuration(productionData, analysis)
 
 	// Determine if any criterion triggered
@@ -196,6 +242,8 @@ func (s *SolarForecastService) evaluateLowProductionDuration(production []SolarP
 	var maxConsecutiveCount int
 	var maxConsecutiveStart, maxConsecutiveEnd time.Time
 	var maxConsecutiveHours []SolarProduction
+	var recoveryHour time.Time
+	var maxStreakRecovered bool
 
 	currentConsecutiveCount := 0
 	var currentConsecutiveStart time.Time
@@ -222,9 +270,24 @@ func (s *SolarForecastService) evaluateLowProductionDuration(production []SolarP
 				maxConsecutiveStart = currentConsecutiveStart
 				maxConsecutiveEnd = prod.Hour
 				maxConsecutiveHours = append([]SolarProduction{}, currentConsecutiveHours...)
+				maxStreakRecovered = false // Reset recovery flag for new max
 			}
 		} else {
-			// Above threshold - reset consecutive count
+			// Above threshold - RECOVERY DETECTED
+
+			// If we just ended the max consecutive streak, capture recovery
+			// Only count as recovery if GHI >= 50 W/m² (still daylight, not sunset)
+			if currentConsecutiveCount > 0 && currentConsecutiveCount == maxConsecutiveCount && prod.GHI >= 50.0 {
+				recoveryHour = prod.Hour
+				maxStreakRecovered = true
+				s.logger.Debug("Recovery detected",
+					"recovery_hour", recoveryHour.Format("15:04"),
+					"after_streak", maxConsecutiveCount,
+					"ghi", prod.GHI,
+				)
+			}
+
+			// Reset consecutive count
 			currentConsecutiveCount = 0
 			currentConsecutiveHours = nil
 		}
@@ -235,6 +298,7 @@ func (s *SolarForecastService) evaluateLowProductionDuration(production []SolarP
 		"duration_threshold_hours", s.config.DurationThresholdHours,
 		"max_consecutive_hours", maxConsecutiveCount,
 		"triggered", maxConsecutiveCount >= s.config.DurationThresholdHours,
+		"has_recovery", maxStreakRecovered,
 	)
 
 	if maxConsecutiveCount >= s.config.DurationThresholdHours {
@@ -243,6 +307,13 @@ func (s *SolarForecastService) evaluateLowProductionDuration(production []SolarP
 		analysis.FirstLowProductionHour = maxConsecutiveStart
 		analysis.LastLowProductionHour = maxConsecutiveEnd
 		analysis.LowProductionHours = maxConsecutiveHours
+
+		// Set recovery fields
+		analysis.HasRecovery = maxStreakRecovered
+		if maxStreakRecovered {
+			analysis.RecoveryHour = recoveryHour
+			analysis.HoursUntilRecovery = int(recoveryHour.Sub(maxConsecutiveStart).Hours())
+		}
 	}
 }
 
@@ -303,6 +374,8 @@ func (s *SolarForecastService) calculateSolarProduction(hour ForecastHour) Solar
 }
 
 // generateRecommendation generates actionable recommendation text
+// DEPRECATED: This field is no longer displayed in alert emails as of the template update.
+// Kept for backward compatibility and potential logging use.
 func (s *SolarForecastService) generateRecommendation(analysis *AlertAnalysis) string {
 	if !analysis.CriteriaTriggered.AnyTriggered {
 		return "Solar production forecast looks normal. No action required."

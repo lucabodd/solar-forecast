@@ -136,6 +136,10 @@ func LoadConfig(configPath string) (*domain.Config, error) {
 			if v, err := strconv.Atoi(value); err == nil {
 				config.APITimeoutSeconds = v
 			}
+		case "pushover_user_key":
+			config.PushoverUserKey = value
+		case "pushover_api_token":
+			config.PushoverAPIToken = value
 		}
 	}
 
@@ -143,19 +147,61 @@ func LoadConfig(configPath string) (*domain.Config, error) {
 		return nil, fmt.Errorf("failed to read config file: %w", err)
 	}
 
+	// Apply environment variable overrides
+	applyEnvOverrides(config)
+
 	// Validate required fields
-	if config.GmailAppPassword == "" || config.GmailAppPassword == "xxxx xxxx xxxx xxxx" {
-		return nil, fmt.Errorf("gmail_app_password not configured (set to xxxx xxxx xxxx xxxx)")
+	if config.GmailAppPassword == "" || config.GmailAppPassword == "YOUR_GMAIL_APP_PASSWORD_HERE" {
+		return nil, fmt.Errorf("gmail_app_password not configured - please set in config file or SOLAR_GMAIL_APP_PASSWORD env var")
 	}
-	if config.GmailSender == "" || strings.Contains(config.GmailSender, "@gmail.com") == false {
-		return nil, fmt.Errorf("gmail_sender not properly configured")
+	if config.GmailSender == "" || strings.Contains(config.GmailSender, "your-email@gmail.com") {
+		return nil, fmt.Errorf("gmail_sender not properly configured - please set in config file or SOLAR_GMAIL_SENDER env var")
 	}
-	if config.RecipientEmail == "" {
-		return nil, fmt.Errorf("recipient_email not configured")
+	if config.RecipientEmail == "" || strings.Contains(config.RecipientEmail, "recipient@example.com") {
+		return nil, fmt.Errorf("recipient_email not configured - please set in config file or SOLAR_RECIPIENT_EMAIL env var")
 	}
 	if config.Latitude == 0 || config.Longitude == 0 {
 		return nil, fmt.Errorf("latitude and longitude must be configured")
 	}
 
 	return config, nil
+}
+
+// applyEnvOverrides applies environment variable overrides to config
+func applyEnvOverrides(config *domain.Config) {
+	// Test mode override (for make mail command)
+	if os.Getenv("SOLAR_TEST_MODE") == "1" {
+		config.ProductionAlertThresholdKW = 5.0
+		config.DurationThresholdHours = 1
+		fmt.Println("[TEST MODE] Using lowered thresholds: 5.0 kW, 1 hour")
+	}
+
+	// Sensitive credentials
+	if v := os.Getenv("SOLAR_GMAIL_APP_PASSWORD"); v != "" {
+		config.GmailAppPassword = v
+	}
+	if v := os.Getenv("SOLAR_GMAIL_SENDER"); v != "" {
+		config.GmailSender = v
+	}
+	if v := os.Getenv("SOLAR_RECIPIENT_EMAIL"); v != "" {
+		config.RecipientEmail = v
+	}
+	if v := os.Getenv("SOLAR_PUSHOVER_USER_KEY"); v != "" {
+		config.PushoverUserKey = v
+	}
+	if v := os.Getenv("SOLAR_PUSHOVER_API_TOKEN"); v != "" {
+		config.PushoverAPIToken = v
+	}
+
+	// Threshold overrides (for testing or adjustment)
+	if v := os.Getenv("SOLAR_PRODUCTION_THRESHOLD_KW"); v != "" {
+		if val, err := strconv.ParseFloat(v, 64); err == nil {
+			config.ProductionAlertThresholdKW = val
+		}
+	}
+	if v := os.Getenv("SOLAR_DURATION_THRESHOLD_HOURS"); v != "" {
+		if val, err := strconv.Atoi(v); err == nil {
+			config.DurationThresholdHours = val
+		}
+	}
 }

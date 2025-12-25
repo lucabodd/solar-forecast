@@ -1,4 +1,4 @@
-.PHONY: build run clean test help install cron-install
+.PHONY: build run clean test help install cron-install notifications config-check
 
 # Default target
 help:
@@ -7,14 +7,30 @@ help:
 	@echo "  make build           - Build the binary"
 	@echo "  make run             - Run the application locally"
 	@echo "  make run-debug       - Run with debug logging"
+	@echo "  make notifications   - Test email and push alerts (lowered thresholds)"
+	@echo "  make config-check    - Verify configuration file exists"
 	@echo "  make test            - Run tests (if available)"
 	@echo "  make clean           - Remove binary and logs"
 	@echo "  make install         - Install binary to /usr/local/bin"
 	@echo "  make cron-install    - Set up cron job (interactive)"
 	@echo ""
 
+# Check if config file exists
+config-check:
+	@if [ ! -f config/application.properties ]; then \
+		echo "❌ Error: config/application.properties not found!"; \
+		echo ""; \
+		echo "Please copy the template and configure it:"; \
+		echo "  cp config/application.properties.template config/application.properties"; \
+		echo ""; \
+		echo "Then edit config/application.properties with your credentials."; \
+		echo ""; \
+		exit 1; \
+	fi
+	@echo "✓ Config file found"
+
 # Build the binary
-build:
+build: config-check
 	@echo "Building solar-forecast..."
 	go build -o solar-forecast ./cmd/solar-forecast
 	@echo "✓ Built successfully: solar-forecast"
@@ -28,6 +44,18 @@ run: build
 run-debug: build
 	@echo "Running solar-forecast with debug logging..."
 	./solar-forecast -config config/application.properties -debug
+
+# Test email alert with lowered thresholds
+notifications: build
+	@echo "🧪 Testing email alert..."
+	@echo "Clearing alert state to allow re-sending..."
+	@rm -f ~/.solar-forecast/alert_state.json
+	@echo "✓ Alert state cleared"
+	@echo ""
+	@echo "Running with test mode (threshold: 5.0 kW, duration: 1 hour)..."
+	SOLAR_TEST_MODE=1 ./solar-forecast -config config/application.properties -debug
+	@echo ""
+	@echo "✅ Done! Check your email and Pushover notifications."
 
 # Clean build artifacts
 clean:

@@ -27,6 +27,12 @@ type EmailNotifier interface {
 	SendRecoveryEmail(ctx context.Context) error
 }
 
+// PushNotifier defines the interface for sending push notifications
+type PushNotifier interface {
+	// SendNotification sends a push notification with optional image
+	SendNotification(ctx context.Context, title, message string, imageData []byte) error
+}
+
 // AlertStateRepository defines the interface for persisting alert state
 type AlertStateRepository interface {
 	// GetLastAlertDate retrieves the last date when alert was sent
@@ -76,6 +82,10 @@ type Config struct {
 	GmailSender      string
 	RecipientEmail   string
 
+	// Pushover push notifications
+	PushoverUserKey   string
+	PushoverAPIToken  string
+
 	// Cron
 	DaytimeStartHour int // hour 0-23
 	DaytimeEndHour   int // hour 0-23
@@ -122,10 +132,16 @@ type AlertCriteria struct {
 type AlertAnalysis struct {
 	CriteriaTriggered      AlertCriteria
 	LowProductionHours     []SolarProduction // Hours with production < threshold
+	AllProductionHours     []SolarProduction // All forecast hours (for chart display)
 	ConsecutiveHourCount   int               // How many consecutive hours triggered
 	FirstLowProductionHour time.Time         // Start of low production period
 	LastLowProductionHour  time.Time         // End of low production period
 	RecommendedAction      string
+
+	// Recovery tracking
+	RecoveryHour       time.Time // When production rises above threshold
+	HoursUntilRecovery int       // Total duration from start to recovery
+	HasRecovery        bool      // Whether recovery happens within 48h forecast
 }
 
 // AlertState tracks whether alert was sent today

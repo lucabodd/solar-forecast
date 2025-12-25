@@ -1,0 +1,75 @@
+# Solar Forecast Warning System - Configuration Template
+# Copy this file to 'application.properties' and fill in your actual values
+
+# ========================================
+# LOCATION SETTINGS
+# ========================================
+# Your geographic coordinates for weather forecast
+# Example: Valencia, Spain (L'Enova)
+latitude=39.47
+longitude=-0.38
+
+# ========================================
+# ALERT THRESHOLD CRITERIA
+# Duration-based alert: triggers when production drops below threshold for 6+ consecutive hours
+# ========================================
+
+# Production Alert Threshold (kW)
+# Alert if estimated output drops below this value
+# For 8.9kW system: use 2.0 kW
+production_alert_threshold_kw=2.0
+
+# Duration Threshold (hours)
+# Alert only if below production threshold for this many consecutive hours
+# Prevents false positives from brief cloud cover
+# Recommended: 6 hours
+duration_threshold_hours=6
+
+# ========================================
+# SOLAR PANEL CONFIGURATION
+# ========================================
+# System rated capacity in kW (manufacturer's rating at STC: 1000 W/m², 25°C)
+# Example: 16 panels × 560W = 8.96 kW
+rated_capacity_kw=8.9
+
+# Inverter efficiency: DC to AC conversion (0.95-0.98 typical)
+inverter_efficiency=0.97
+
+# Temperature derating coefficient: % per °C above 25°C (-0.4 to -0.5 typical)
+temp_coefficient=-0.4
+
+# ========================================
+# EMAIL CONFIGURATION
+# ========================================
+# Gmail app password - Generate at: https://myaccount.google.com/apppasswords
+gmail_app_password=YOUR_GMAIL_APP_PASSWORD_HERE
+
+# Gmail sender address
+gmail_sender=your-email@gmail.com
+
+# Alert recipient email
+recipient_email=recipient@example.com
+
+# ========================================
+# PUSHOVER NOTIFICATIONS (Optional)
+# ========================================
+# User key from https://pushover.net (leave as placeholder to disable)
+pushover_user_key=YOUR_PUSHOVER_USER_KEY
+
+# API token from https://pushover.net/apps/build (leave as placeholder to disable)
+pushover_api_token=YOUR_PUSHOVER_API_TOKEN
+
+# ========================================
+# CRON SCHEDULING
+# ========================================
+# Daytime check window (24-hour format, 0-23)
+daytime_start_hour=8
+daytime_end_hour=20
+
+# ========================================
+# API CONFIGURATION
+# ========================================
+# Open-Meteo API retry settings
+api_retry_attempts=3
+api_retry_delay_seconds=5
+api_timeout_seconds=10

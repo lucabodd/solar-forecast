@@ -18,6 +18,7 @@ type GmailAdapter struct {
 	senderPassword   string
 	recipientEmail   string
 	logger           domain.Logger
+	alertThresholdKW float64 // Store threshold for color coding in emails
 }
 
 // NewGmailAdapter creates a new Gmail adapter
@@ -27,6 +28,7 @@ func NewGmailAdapter(config *domain.Config, logger domain.Logger) *GmailAdapter 
 		senderPassword:   config.GmailAppPassword,
 		recipientEmail:   config.RecipientEmail,
 		logger:           logger,
+		alertThresholdKW: config.ProductionAlertThresholdKW,
 	}
 }
 
@@ -75,6 +77,7 @@ func (a *GmailAdapter) generateHTMLBody(analysis *domain.AlertAnalysis) string {
 <html>
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; line-height: 1.6; color: #2c3e50; background: #ecf0f1; }
@@ -299,6 +302,36 @@ func (a *GmailAdapter) generateHTMLBody(analysis *domain.AlertAnalysis) string {
         .footer a:hover {
             text-decoration: underline;
         }
+
+        /* Mobile responsive styles */
+        @media only screen and (max-width: 600px) {
+            .header { padding: 30px 15px !important; }
+            .header h1 { font-size: 24px !important; }
+            .header .timestamp { font-size: 13px !important; }
+            .content { padding: 20px 15px !important; }
+            .alert-banner { padding: 20px !important; }
+            .alert-banner h2 { font-size: 20px !important; }
+            .alert-banner p { font-size: 14px !important; }
+            .metrics {
+                grid-template-columns: 1fr !important;
+                gap: 15px !important;
+            }
+            .metric { padding: 20px !important; }
+            .metric-value { font-size: 28px !important; }
+            .metric-value.large { font-size: 32px !important; }
+            .chart-section { padding: 20px 15px !important; }
+            .chart-title { font-size: 16px !important; }
+            table { font-size: 12px !important; display: block; overflow-x: auto; }
+            table th, table td { padding: 8px !important; }
+            .details, .recommendation { padding: 20px !important; }
+            .footer { padding: 20px 15px !important; }
+        }
+
+        @media only screen and (max-width: 400px) {
+            .header h1 { font-size: 20px !important; }
+            .metric-value { font-size: 24px !important; }
+            .metric-value.large { font-size: 28px !important; }
+        }
     </style>
     <script>
         // Simple SVG line chart generation
@@ -341,7 +374,11 @@ func (a *GmailAdapter) generateHTMLBody(analysis *domain.AlertAnalysis) string {
         <div class="content">
             <div class="alert-banner">
                 <h2>⚠️ Low Solar Production Forecasted</h2>
-                <p>The next 48 hours show significant reduction in solar production due to adverse weather conditions. Please review the forecast data below.</p>
+                <p>Production forecasted below ` + fmt.Sprintf("%.1f kW for %d consecutive hours (%s to %s)",
+					a.alertThresholdKW,
+					analysis.ConsecutiveHourCount,
+					analysis.FirstLowProductionHour.Format("15:04"),
+					analysis.LastLowProductionHour.Format("15:04")) + `. Please review the forecast data below.</p>
             </div>
 
             <div class="metrics">
@@ -366,32 +403,24 @@ func (a *GmailAdapter) generateHTMLBody(analysis *domain.AlertAnalysis) string {
 
 	html.WriteString(fmt.Sprintf(`
                 <div class="metric">
-                    <div class="metric-label">⏰ Time Window</div>
+                    <div class="metric-label">⏰ Low Production Period</div>
                     <div class="metric-value large">%s-%s</div>
                 </div>
             </div>
 `, analysis.FirstLowProductionHour.Format("15:04"), analysis.LastLowProductionHour.Format("15:04")))
 
-	// Solar output line chart for low production hours
-	if len(analysis.LowProductionHours) > 0 {
-		html.WriteString(a.generateOutputLineChart(analysis.LowProductionHours))
+	// Solar production & cloud coverage chart - showing next 12 hours from now
+	if len(analysis.AllProductionHours) > 0 {
+		html.WriteString(a.generateOutputLineChart(analysis.AllProductionHours))
 	}
 
-	// Detailed table
-	html.WriteString(a.generateDetailedTable(analysis))
-
-	// Hourly weather conditions table
-	if len(analysis.LowProductionHours) > 0 {
-		html.WriteString(a.generateWeatherConditionsTable(analysis.LowProductionHours))
+	// Hourly weather conditions table - show ALL hours with color coding
+	if len(analysis.AllProductionHours) > 0 {
+		html.WriteString(a.generateWeatherConditionsTable(analysis.AllProductionHours))
 	}
 
-	// Recommendation
-	html.WriteString(fmt.Sprintf(`
-            <div class="recommendation">
-                <h3>📋 Recommended Action</h3>
-                <p>%s</p>
-            </div>
-`, analysis.RecommendedAction))
+	// Recovery forecast section
+	html.WriteString(a.generateRecoverySection(analysis))
 
 	html.WriteString(`
             <div class="footer">
@@ -473,7 +502,7 @@ func (a *GmailAdapter) generateCloudCoverLineChart(hours []domain.ForecastHour) 
 		html.WriteString(fmt.Sprintf(`                    <line class="chart-grid" x1="%d" y1="%.0f" x2="%d" y2="%.0f" />
 `, padding, y, chartWidth-padding, y))
 		value := maxValue - (float64(i)/4.0)*(maxValue-minValue)
-		html.WriteString(fmt.Sprintf(`                    <text class="chart-label" x="%d" y="%.0f" text-anchor="end">%.0f%%</text>
+		html.WriteString(fmt.Sprintf(`                    <text class="chart-label" x="%d" y="%.0f" text-anchor="end">%.1f kWh</text>
 `, padding-10, y+4, value))
 	}
 
@@ -669,48 +698,90 @@ func (a *GmailAdapter) generateGHILineChart(hours []domain.ForecastHour) string 
 	return html.String()
 }
 
-// generateOutputLineChart generates an SVG line chart for estimated solar output
+// filterFromNow returns up to 'count' production hours starting from current time
+func filterFromNow(hours []domain.SolarProduction, count int) []domain.SolarProduction {
+	now := time.Now()
+	currentHourStart := now.Truncate(time.Hour) // e.g., 14:23:45 → 14:00:00
+
+	var filtered []domain.SolarProduction
+	for _, h := range hours {
+		hourStart := h.Hour.Truncate(time.Hour)
+		// Include current hour and all future hours
+		if !hourStart.Before(currentHourStart) { // >= comparison
+			filtered = append(filtered, h)
+			if len(filtered) >= count {
+				break
+			}
+		}
+	}
+	return filtered
+}
+
+// generateOutputLineChart generates a dual-axis SVG chart with production (kW) and cloud coverage (%)
 func (a *GmailAdapter) generateOutputLineChart(production []domain.SolarProduction) string {
 	var html strings.Builder
-	
-	// Sort by hour and limit to next 12 hours
+
+	// Sort by hour
 	sort.Slice(production, func(i, j int) bool {
 		return production[i].Hour.Before(production[j].Hour)
 	})
+
+	// Filter to next 12 hours from current time
+	production = filterFromNow(production, 12)
+
+	// Debug: log time range
+	if a.logger != nil && len(production) > 0 {
+		a.logger.Debug("Email chart time range",
+			"now", time.Now().Format("2006-01-02 15:04:05"),
+			"first_hour", production[0].Hour.Format("2006-01-02 15:04:05"),
+			"last_hour", production[len(production)-1].Hour.Format("2006-01-02 15:04:05"),
+			"total_hours", len(production))
+	}
 
 	if len(production) == 0 {
 		return ""
 	}
 
-	// Limit to 12 hours
-	if len(production) > 12 {
-		production = production[:12]
-	}
-
 	chartWidth := 800
 	chartHeight := 360
 	padding := 60
-	
-	// Create point data
-	var points []float64
+	rightPadding := 80 // Extra padding for right Y-axis
+
+	// Create production data (hourly kW values)
+	var productionPoints []float64
+	var maxProduction float64
+	var cloudPoints []float64
+
 	for i, prod := range production {
 		if i >= 12 {
 			break
 		}
-		percent := prod.OutputPercentage
-		if percent < 0 {
-			percent = 0
+		kw := prod.EstimatedOutputKW
+		if kw < 0 {
+			kw = 0
 		}
-		points = append(points, percent)
+		productionPoints = append(productionPoints, kw)
+		if kw > maxProduction {
+			maxProduction = kw
+		}
+		cloudPoints = append(cloudPoints, float64(prod.CloudCover))
 	}
 
-	maxValue := float64(100)
-	minValue := float64(0)
+	// Round up maxProduction to nearest 1 kW for cleaner axis
+	maxProduction = float64(int(maxProduction)+1)
+	if maxProduction < 2 {
+		maxProduction = 2 // Minimum scale of 2 kW
+	}
+	minProduction := float64(0)
+
+	// Cloud coverage always 0-100%
+	maxCloud := 100.0
+	minCloud := 0.0
 
 	html.WriteString(`
             <div class="chart-section">
-                <div class="chart-title">⚡ Estimated Solar Output (Next 12 Hours)</div>
-                <svg viewBox="0 0 ` + fmt.Sprintf("%d %d", chartWidth, chartHeight) + `" xmlns="http://www.w3.org/2000/svg">
+                <div class="chart-title">⚡ Solar Production & Cloud Coverage Forecast (Next 12 Hours)</div>
+                <svg viewBox="0 0 ` + fmt.Sprintf("%d %d", chartWidth+rightPadding, chartHeight) + `" xmlns="http://www.w3.org/2000/svg">
                     <defs>
                         <linearGradient id="outputGradient" x1="0%" y1="0%" x2="0%" y2="100%">
                             <stop offset="0%" style="stop-color:#FFD60A;stop-opacity:0.4" />
@@ -727,14 +798,23 @@ func (a *GmailAdapter) generateOutputLineChart(production []domain.SolarProducti
                         </filter>
                         <style>
                             .output-line { fill: none; stroke: url(#lineGradient); stroke-width: 4; stroke-linecap: round; stroke-linejoin: round; filter: url(#shadow); }
+                            .cloud-line { fill: none; stroke: #3498db; stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; opacity: 0.7; stroke-dasharray: 5,5; }
                             .output-area { fill: url(#outputGradient); }
                             .chart-grid { stroke: #e0e6ed; stroke-width: 1; }
                             .chart-label { font-size: 12px; fill: #7f8c8d; }
+                            .chart-label-right { font-size: 12px; fill: #3498db; }
                             .output-value { font-size: 11px; fill: #FF6B35; font-weight: bold; }
+                            .cloud-value { font-size: 10px; fill: #3498db; font-weight: bold; }
                             .output-dot { fill: #FF6B35; r: 4; }
+                            .cloud-dot { fill: #3498db; r: 3; }
+                            .legend { font-size: 13px; font-weight: bold; }
                         </style>
                     </defs>
-                    
+
+                    <!-- Legend -->
+                    <text class="legend" x="` + fmt.Sprintf("%d", padding) + `" y="25" fill="#FF6B35">● Production (kW)</text>
+                    <text class="legend" x="` + fmt.Sprintf("%d", padding+180) + `" y="25" fill="#3498db">● Cloud Coverage (%)</text>
+
                     <!-- Grid lines -->
 `)
 
@@ -743,55 +823,87 @@ func (a *GmailAdapter) generateOutputLineChart(production []domain.SolarProducti
 		y := float64(padding) + (float64(i) / 4.0) * float64(chartHeight-2*padding)
 		html.WriteString(fmt.Sprintf(`                    <line class="chart-grid" x1="%d" y1="%.0f" x2="%d" y2="%.0f" />
 `, padding, y, chartWidth-padding, y))
-		value := maxValue - (float64(i)/4.0)*(maxValue-minValue)
-		html.WriteString(fmt.Sprintf(`                    <text class="chart-label" x="%d" y="%.0f" text-anchor="end">%.0f%%</text>
-`, padding-10, y+4, value))
+
+		// Left Y-axis labels (Production kW)
+		valueLeft := maxProduction - (float64(i)/4.0)*(maxProduction-minProduction)
+		html.WriteString(fmt.Sprintf(`                    <text class="chart-label" x="%d" y="%.0f" text-anchor="end">%.1f kW</text>
+`, padding-10, y+4, valueLeft))
+
+		// Right Y-axis labels (Cloud %)
+		valueRight := maxCloud - (float64(i)/4.0)*(maxCloud-minCloud)
+		html.WriteString(fmt.Sprintf(`                    <text class="chart-label-right" x="%d" y="%.0f" text-anchor="start">%.0f%%</text>
+`, chartWidth-padding+10, y+4, valueRight))
 	}
 
-	// Calculate path data
-	pointSpacing := float64(chartWidth-2*padding) / float64(len(points)-1)
-	pathData := fmt.Sprintf("M %d %d", padding, chartHeight-padding)
+	// Calculate point spacing
+	pointSpacing := float64(chartWidth-2*padding) / float64(len(productionPoints)-1)
+
+	// Build production path
+	productionPath := fmt.Sprintf("M %d %d", padding, chartHeight-padding)
 	var areaPath strings.Builder
 	areaPath.WriteString(fmt.Sprintf("M %d %d", padding, chartHeight-padding))
 
-	for i, point := range points {
+	for i, point := range productionPoints {
 		x := float64(padding) + float64(i)*pointSpacing
-		y := float64(chartHeight-padding) - ((point-minValue)/(maxValue-minValue))*float64(chartHeight-2*padding)
-		pathData += fmt.Sprintf(" L %.1f %.1f", x, y)
+		y := float64(chartHeight-padding) - ((point-minProduction)/(maxProduction-minProduction))*float64(chartHeight-2*padding)
+		productionPath += fmt.Sprintf(" L %.1f %.1f", x, y)
 		areaPath.WriteString(fmt.Sprintf(" L %.1f %.1f", x, y))
 	}
-	
+
 	areaPath.WriteString(fmt.Sprintf(" L %d %d Z", chartWidth-padding, chartHeight-padding))
 
-	// Add area under curve
-	html.WriteString(fmt.Sprintf(`                    <path class="output-area" d="%s" />
-`, areaPath.String()))
-
-	// Add line
-	html.WriteString(fmt.Sprintf(`                    <path class="output-line" d="%s" />
-`, pathData))
-
-	// Add points and labels
-	for i, point := range points {
-		if i%4 == 0 || i == len(points)-1 {
-			x := float64(padding) + float64(i)*pointSpacing
-			y := float64(chartHeight-padding) - ((point-minValue)/(maxValue-minValue))*float64(chartHeight-2*padding)
-			html.WriteString(fmt.Sprintf(`                    <circle class="output-dot" cx="%.1f" cy="%.1f" />
-`, x, y))
-			html.WriteString(fmt.Sprintf(`                    <text class="output-value" x="%.1f" y="%.1f" text-anchor="middle">%.1f%%</text>
-`, x, y-12, point))
+	// Build cloud coverage path (using right Y-axis scale)
+	cloudPath := ""
+	for i, cloud := range cloudPoints {
+		x := float64(padding) + float64(i)*pointSpacing
+		y := float64(chartHeight-padding) - ((cloud-minCloud)/(maxCloud-minCloud))*float64(chartHeight-2*padding)
+		if i == 0 {
+			cloudPath = fmt.Sprintf("M %.1f %.1f", x, y)
+		} else {
+			cloudPath += fmt.Sprintf(" L %.1f %.1f", x, y)
 		}
 	}
 
-	// Add x-axis labels (time) - every hour with larger font
+	// Add area under production curve
+	html.WriteString(fmt.Sprintf(`                    <path class="output-area" d="%s" />
+`, areaPath.String()))
+
+	// Add production line
+	html.WriteString(fmt.Sprintf(`                    <path class="output-line" d="%s" />
+`, productionPath))
+
+	// Add cloud coverage line
+	html.WriteString(fmt.Sprintf(`                    <path class="cloud-line" d="%s" />
+`, cloudPath))
+
+	// Add production points and labels
+	for i, point := range productionPoints {
+		x := float64(padding) + float64(i)*pointSpacing
+		y := float64(chartHeight-padding) - ((point-minProduction)/(maxProduction-minProduction))*float64(chartHeight-2*padding)
+		html.WriteString(fmt.Sprintf(`                    <circle class="output-dot" cx="%.1f" cy="%.1f" r="5" />
+`, x, y))
+		html.WriteString(fmt.Sprintf(`                    <text class="output-value" x="%.1f" y="%.1f" text-anchor="middle">%.1f kW</text>
+`, x, y-12, point))
+	}
+
+	// Add cloud coverage dots and labels
+	for i, cloud := range cloudPoints {
+		x := float64(padding) + float64(i)*pointSpacing
+		y := float64(chartHeight-padding) - ((cloud-minCloud)/(maxCloud-minCloud))*float64(chartHeight-2*padding)
+		html.WriteString(fmt.Sprintf(`                    <circle class="cloud-dot" cx="%.1f" cy="%.1f" r="4" />
+`, x, y))
+		html.WriteString(fmt.Sprintf(`                    <text class="cloud-value" x="%.1f" y="%.1f" text-anchor="middle">%.0f%%</text>
+`, x, y+18, cloud))
+	}
+
+	// Add x-axis labels (time) - every hour
 	html.WriteString(`                    <!-- X-axis labels -->
 `)
-	for i := 0; i < len(points); i++ { // Show every hour
+	for i := 0; i < len(productionPoints); i++ {
 		if i < len(production) {
 			x := float64(padding) + float64(i)*pointSpacing
 			prod := production[i]
-			// Format: HH:00 (e.g., 14:00)
-			timeStr := prod.Hour.Format("15:00")
+			timeStr := prod.Hour.Format("15:04")
 			html.WriteString(fmt.Sprintf(`                    <text x="%.1f" y="%.0f" text-anchor="middle" style="font-size: 11px; fill: #2c3e50; font-weight: bold;">%s</text>
 `, x, float64(chartHeight-padding+30), timeStr))
 		}
@@ -805,52 +917,6 @@ func (a *GmailAdapter) generateOutputLineChart(production []domain.SolarProducti
                 </svg>
             </div>
 `)
-	return html.String()
-}
-
-// generateDetailedTable generates a table with all relevant data
-func (a *GmailAdapter) generateDetailedTable(analysis *domain.AlertAnalysis) string {
-	var html strings.Builder
-	html.WriteString(`
-        <div class="details">
-            <h3>📊 Analysis Summary</h3>
-            <div class="detail-item">
-                <strong>Analysis Period:</strong> Daylight hours in next 48-hour forecast
-            </div>
-            <div class="detail-item">
-                <strong>Analysis Method:</strong> Automatic daylight detection using solar irradiance (GHI ≥ 50 W/m²)
-            </div>
-            <div class="detail-item">
-                <strong>Alert Triggered:</strong> Production below 2 kW
-            </div>
-            <div class="detail-item">
-                <strong>Duration:</strong> %d consecutive daylight hours
-            </div>
-            <div class="detail-item">
-                <strong>Time Window:</strong> %s to %s
-            </div>
-            <div class="detail-item">
-                <strong>Minimum Production:</strong> %.2f kW
-            </div>
-`)
-
-	minProd := 999.0
-	if len(analysis.LowProductionHours) > 0 {
-		for _, p := range analysis.LowProductionHours {
-			if p.EstimatedOutputKW < minProd {
-				minProd = p.EstimatedOutputKW
-			}
-		}
-	}
-
-	html.WriteString(fmt.Sprintf(`
-        </div>
-`,
-		analysis.ConsecutiveHourCount,
-		analysis.FirstLowProductionHour.Format("15:04"),
-		analysis.LastLowProductionHour.Format("15:04"),
-		minProd))
-
 	return html.String()
 }
 
@@ -910,22 +976,36 @@ func (a *GmailAdapter) generateWeatherConditionsTable(hours []domain.SolarProduc
 `)
 
 	for i, prod := range displayHours {
-		rowBg := "#FFFFFF"
-		if i%2 == 1 {
-			rowBg = "#F8F9FA"
+		// Color code based on production threshold
+		var rowBg, borderLeft, textColor, statusIcon string
+		if prod.EstimatedOutputKW >= a.alertThresholdKW {
+			// Good production - green theme
+			if i%2 == 0 {
+				rowBg = "#E8F5E9"
+			} else {
+				rowBg = "#C8E6C9"
+			}
+			borderLeft = "4px solid #4CAF50"
+			textColor = "#2C3E50"
+			statusIcon = "✓"
+		} else {
+			// Low production - red theme
+			if i%2 == 0 {
+				rowBg = "#FFEBEE"
+			} else {
+				rowBg = "#FFCDD2"
+			}
+			borderLeft = "4px solid #F44336"
+			textColor = "#C0392B"
+			statusIcon = "⚠"
 		}
 
 		icon := a.getWeatherIcon(prod.CloudCover, prod.GHI)
 		condition := a.getConditionText(prod.CloudCover, prod.GHI)
 
-		textColor := "#2C3E50"
-		if prod.EstimatedOutputKW < 1.0 {
-			textColor = "#C0392B"
-		}
-
 		html.WriteString(fmt.Sprintf(`
-                    <tr style="background: %s; border-bottom: 1px solid #E0E6ED;">
-                        <td style="padding: 12px; font-weight: 600; color: #2C3E50;">%s</td>
+                    <tr style="background: %s; border-left: %s; border-bottom: 1px solid #E0E6ED;">
+                        <td style="padding: 12px; font-weight: 600; color: #2C3E50;">%s %s</td>
                         <td style="padding: 12px; text-align: center;">
                             <span style="font-size: 24px;">%s</span>
                             <div style="font-size: 11px; color: #7F8C8D; margin-top: 4px;">%s</div>
@@ -933,7 +1013,7 @@ func (a *GmailAdapter) generateWeatherConditionsTable(hours []domain.SolarProduc
                         <td style="padding: 12px; text-align: right; font-weight: 700; color: %s; font-size: 16px;">%.2f kW</td>
                         <td style="padding: 12px; text-align: right; font-weight: 600; color: %s;">%.1f%%</td>
                     </tr>
-`, rowBg, prod.Hour.Format("15:04"), icon, condition, textColor, prod.EstimatedOutputKW, textColor, prod.OutputPercentage))
+`, rowBg, borderLeft, prod.Hour.Format("15:04"), statusIcon, icon, condition, textColor, prod.EstimatedOutputKW, textColor, prod.OutputPercentage))
 	}
 
 	html.WriteString(`
@@ -941,6 +1021,86 @@ func (a *GmailAdapter) generateWeatherConditionsTable(hours []domain.SolarProduc
             </table>
         </div>
 `)
+
+	return html.String()
+}
+
+// generateRecoverySection displays when conditions are expected to improve
+func (a *GmailAdapter) generateRecoverySection(analysis *domain.AlertAnalysis) string {
+	var html strings.Builder
+
+	html.WriteString(`
+        <div style="margin-top: 30px; padding: 25px; background: linear-gradient(135deg, #E8F4F8 0%, #D4E9F7 100%); border-radius: 12px; border-left: 4px solid #3498DB; box-shadow: 0 2px 4px rgba(52, 152, 219, 0.1);">
+            <div style="font-size: 20px; font-weight: 700; margin-bottom: 15px; color: #2C3E50; display: flex; align-items: center; gap: 10px;">
+                <span>🌤️ Recovery Forecast</span>
+            </div>
+    `)
+
+	if analysis.HasRecovery {
+		// Recovery detected within forecast window
+		html.WriteString(fmt.Sprintf(`
+            <div style="padding: 15px; background: white; border-radius: 8px; margin-bottom: 12px;">
+                <div style="font-size: 15px; color: #155724; margin-bottom: 8px;">
+                    <strong>✅ Conditions Expected to Improve</strong>
+                </div>
+                <div style="font-size: 14px; color: #2C3E50; line-height: 1.8;">
+                    <div style="padding: 8px 0; border-bottom: 1px solid #E0E6ED;">
+                        <strong>Recovery Time:</strong> %s
+                    </div>
+                    <div style="padding: 8px 0; border-bottom: 1px solid #E0E6ED;">
+                        <strong>Low Period Duration:</strong> %d hours (%s to %s)
+                    </div>
+                    <div style="padding: 8px 0;">
+                        <strong>Time Until Recovery:</strong> %d hours from low period start
+                    </div>
+                </div>
+            </div>
+            <div style="padding: 12px; background: rgba(52, 152, 219, 0.1); border-radius: 6px; font-size: 13px; color: #2C3E50; line-height: 1.6;">
+                💡 <strong>What this means:</strong> Solar production is expected to rise above 2.0 kW at %s,
+                approximately %d hours after the low production period begins. Plan your energy usage accordingly.
+            </div>
+        `,
+			analysis.RecoveryHour.Format("15:04 MST"),
+			analysis.ConsecutiveHourCount,
+			analysis.FirstLowProductionHour.Format("15:04"),
+			analysis.LastLowProductionHour.Format("15:04"),
+			analysis.HoursUntilRecovery,
+			analysis.RecoveryHour.Format("15:04"),
+			analysis.HoursUntilRecovery,
+		))
+	} else {
+		// No recovery within 48-hour forecast window
+		html.WriteString(fmt.Sprintf(`
+            <div style="padding: 15px; background: white; border-radius: 8px; margin-bottom: 12px;">
+                <div style="font-size: 15px; color: #C0392B; margin-bottom: 8px;">
+                    <strong>⚠️ Extended Low Production Period</strong>
+                </div>
+                <div style="font-size: 14px; color: #2C3E50; line-height: 1.8;">
+                    <div style="padding: 8px 0; border-bottom: 1px solid #E0E6ED;">
+                        <strong>Low Period Duration:</strong> %d hours
+                    </div>
+                    <div style="padding: 8px 0; border-bottom: 1px solid #E0E6ED;">
+                        <strong>Period:</strong> %s to %s
+                    </div>
+                    <div style="padding: 8px 0;">
+                        <strong>Recovery:</strong> Not expected within 48-hour forecast window
+                    </div>
+                </div>
+            </div>
+            <div style="padding: 12px; background: rgba(192, 57, 43, 0.1); border-radius: 6px; font-size: 13px; color: #2C3E50; line-height: 1.6;">
+                💡 <strong>What this means:</strong> Adverse weather conditions may persist beyond the forecast period.
+                Consider alternative power arrangements and monitor for updated forecasts.
+            </div>
+        `,
+			analysis.ConsecutiveHourCount,
+			analysis.FirstLowProductionHour.Format("15:04"),
+			analysis.LastLowProductionHour.Format("15:04"),
+		))
+	}
+
+	html.WriteString(`
+        </div>
+    `)
 
 	return html.String()
 }

@@ -2,3 +2,14 @@ solar-forecast
 *.log
 .DS_Store
 state/
+
+# Configuration files with credentials
+config/application.properties
+config/*.user
+.env
+*.key
+*.pem
+
+# Sensitive data
+*credentials*
+*secret*
