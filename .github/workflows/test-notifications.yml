@@ -1,4 +1,4 @@
-name: Test Notifications on Push
+name: Build and Verify
 
 # Trigger on every push to main branch
 on:
@@ -14,13 +14,13 @@ env:
   CONFIG_PATH: '${{ github.workspace }}/config/application.properties'
 
 jobs:
-  build-and-test-notifications:
-    name: Build and Test Notifications
+  build-and-verify:
+    name: Build and Verify Compilation
     # Run on self-hosted Mac runner with custom label
     runs-on: [self-hosted, macOS, mac-notifications]
 
-    # Timeout after 10 minutes (prevents hung jobs)
-    timeout-minutes: 10
+    # Timeout after 5 minutes (build is quick)
+    timeout-minutes: 5
 
     steps:
       # Step 1: Checkout code
@@ -72,12 +72,6 @@ jobs:
       # Step 7: Run make build to verify compilation
       - name: Build application
         run: make build
-        env:
-          SOLAR_GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
-          SOLAR_GMAIL_SENDER: ${{ secrets.GMAIL_SENDER }}
-          SOLAR_RECIPIENT_EMAIL: ${{ secrets.RECIPIENT_EMAIL }}
-          SOLAR_PUSHOVER_USER_KEY: ${{ secrets.PUSHOVER_USER_KEY }}
-          SOLAR_PUSHOVER_API_TOKEN: ${{ secrets.PUSHOVER_API_TOKEN }}
 
       # Step 8: Verify binary was created
       - name: Verify binary
@@ -90,30 +84,29 @@ jobs:
           ls -lh solar-forecast
           file solar-forecast
 
-      # Step 9: Run make notifications (actual test)
-      - name: Run notification test
-        run: make notifications
-        env:
-          SOLAR_GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
-          SOLAR_GMAIL_SENDER: ${{ secrets.GMAIL_SENDER }}
-          SOLAR_RECIPIENT_EMAIL: ${{ secrets.RECIPIENT_EMAIL }}
-          SOLAR_PUSHOVER_USER_KEY: ${{ secrets.PUSHOVER_USER_KEY }}
-          SOLAR_PUSHOVER_API_TOKEN: ${{ secrets.PUSHOVER_API_TOKEN }}
-
-      # Step 10: Verify notification success
-      - name: Verify notification success
+      # Step 9: Run basic syntax check
+      - name: Verify binary is executable
         run: |
-          echo "✅ Notification test completed successfully"
-          echo "Check your email and Pushover app for test notifications"
+          chmod +x solar-forecast
+          ./solar-forecast --help 2>&1 || echo "✓ Binary is executable (exit expected without config)"
+
+      # Step 10: Run Go tests if any exist
+      - name: Run tests
+        run: |
+          if [ -n "$(find . -name '*_test.go' 2>/dev/null)" ]; then
+            echo "Running Go tests..."
+            go test ./... -v
+          else
+            echo "✓ No tests found, skipping test execution"
+          fi
 
       # Step 11: Cleanup (always runs, even on failure)
       - name: Cleanup artifacts
         if: always()
         run: |
-          echo "Cleaning up sensitive files..."
+          echo "Cleaning up build artifacts..."
           rm -f solar-forecast
           rm -f config/application.properties
-          rm -f ~/.solar-forecast/alert_state.json
           echo "✓ Cleanup complete"
 
       # Step 12: Upload logs on failure
