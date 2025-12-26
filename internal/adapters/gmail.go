@@ -987,13 +987,29 @@ func (a *GmailAdapter) generateOutputLineChart(production []domain.SolarProducti
 	// Add x-axis labels (time) - daylight hours only
 	html.WriteString(`                    <!-- X-axis labels -->
 `)
+	var previousDay int
 	for i := 0; i < len(productionPoints); i++ {
 		if i < len(production) {
 			prod := production[i]
+
+			// Draw day change marker
+			currentDay := prod.Hour.Day()
+			if i > 0 && currentDay != previousDay {
+				x := float64(padding) + xPositions[i]
+				// Draw vertical line for day change
+				html.WriteString(fmt.Sprintf(`                    <line x1="%.1f" y1="%d" x2="%.1f" y2="%d" stroke="#e74c3c" stroke-width="2" stroke-dasharray="5,5" opacity="0.6" />
+`, x, padding, x, chartHeight-padding))
+				// Add "Day 2", "Day 3" label at top
+				dayLabel := fmt.Sprintf("Day %d", (i / 24) + 1)
+				html.WriteString(fmt.Sprintf(`                    <text x="%.1f" y="%d" text-anchor="middle" style="font-size: 10px; fill: #e74c3c; font-weight: bold;">%s</text>
+`, x, padding-5, dayLabel))
+			}
+			previousDay = currentDay
+
 			// Only show time labels during daylight hours
 			if prod.GHI >= a.daylightGHIThreshold {
 				x := float64(padding) + xPositions[i]
-				timeStr := prod.Hour.Format("15:04")
+				timeStr := prod.Hour.Format("15")
 				html.WriteString(fmt.Sprintf(`                    <text x="%.1f" y="%.0f" text-anchor="middle" style="font-size: 11px; fill: #2c3e50; font-weight: bold;">%s</text>
 `, x, float64(chartHeight-padding+30), timeStr))
 			}

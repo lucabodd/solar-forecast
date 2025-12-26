@@ -254,13 +254,35 @@ func (p *PushoverAdapter) GenerateChartImage(production []domain.SolarProduction
 		}
 	}
 
+	// Day change markers
+	var previousDay int
+	for i, prod := range production {
+		currentDay := prod.Hour.Day()
+		if i > 0 && currentDay != previousDay {
+			x := float64(padding) + xPositions[i]
+			// Draw vertical dashed line for day change
+			dc.SetColor(color.RGBA{231, 76, 60, 180}) // Semi-transparent red
+			dc.SetLineWidth(2)
+			dc.SetDash(5, 5)
+			dc.DrawLine(x, float64(padding), x, float64(padding+chartHeight))
+			dc.Stroke()
+			dc.SetDash() // Reset dash
+
+			// Add "Day 2", "Day 3" label
+			dc.SetColor(color.RGBA{231, 76, 60, 255})
+			dayLabel := fmt.Sprintf("Day %d", (i/24)+1)
+			dc.DrawStringAnchored(dayLabel, x, float64(padding-5), 0.5, 1)
+		}
+		previousDay = currentDay
+	}
+
 	// X-axis labels (time) - daylight hours only
 	dc.SetColor(color.RGBA{44, 62, 80, 255})
 	for i, prod := range production {
 		// Only show time labels during daylight hours
 		if prod.GHI >= p.daylightGHIThreshold {
 			x := float64(padding) + xPositions[i]
-			timeStr := prod.Hour.Format("15:04")
+			timeStr := prod.Hour.Format("15")
 			dc.DrawStringAnchored(timeStr, x, float64(padding+chartHeight+35), 0.5, 0)
 		}
 	}
