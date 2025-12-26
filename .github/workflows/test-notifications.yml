@@ -1,0 +1,128 @@
+name: Test Notifications on Push
+
+# Trigger on every push to main branch
+on:
+  push:
+    branches:
+      - main
+  # Allow manual workflow dispatch for testing
+  workflow_dispatch:
+
+# Environment variables for the entire workflow
+env:
+  GO_VERSION: '1.25'
+  CONFIG_PATH: '${{ github.workspace }}/config/application.properties'
+
+jobs:
+  build-and-test-notifications:
+    name: Build and Test Notifications
+    # Run on self-hosted Mac runner with custom label
+    runs-on: [self-hosted, macOS, mac-notifications]
+
+    # Timeout after 10 minutes (prevents hung jobs)
+    timeout-minutes: 10
+
+    steps:
+      # Step 1: Checkout code
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # Step 2: Setup Go
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      # Step 3: Verify Go installation
+      - name: Verify Go installation
+        run: |
+          go version
+          which go
+
+      # Step 4: Prepare configuration directory
+      - name: Prepare configuration directory
+        run: mkdir -p config
+
+      # Step 5: Copy application.properties from runner config
+      - name: Setup application configuration
+        run: |
+          if [ -f ~/actions-runner-config/application.properties ]; then
+            cp ~/actions-runner-config/application.properties config/application.properties
+            chmod 600 config/application.properties
+            echo "✓ Configuration file copied successfully"
+          else
+            echo "Error: ~/actions-runner-config/application.properties not found"
+            echo "Please create this file following the setup instructions"
+            exit 1
+          fi
+
+      # Step 6: Verify configuration file
+      - name: Verify configuration exists
+        run: |
+          if [ ! -f config/application.properties ]; then
+            echo "Error: config/application.properties not found"
+            exit 1
+          fi
+          echo "✓ Configuration file present"
+          echo "Config file size: $(wc -l < config/application.properties) lines"
+
+      # Step 7: Run make build to verify compilation
+      - name: Build application
+        run: make build
+        env:
+          SOLAR_GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          SOLAR_GMAIL_SENDER: ${{ secrets.GMAIL_SENDER }}
+          SOLAR_RECIPIENT_EMAIL: ${{ secrets.RECIPIENT_EMAIL }}
+          SOLAR_PUSHOVER_USER_KEY: ${{ secrets.PUSHOVER_USER_KEY }}
+          SOLAR_PUSHOVER_API_TOKEN: ${{ secrets.PUSHOVER_API_TOKEN }}
+
+      # Step 8: Verify binary was created
+      - name: Verify binary
+        run: |
+          if [ ! -f solar-forecast ]; then
+            echo "Error: Binary not created"
+            exit 1
+          fi
+          echo "✓ Binary created successfully"
+          ls -lh solar-forecast
+          file solar-forecast
+
+      # Step 9: Run make notifications (actual test)
+      - name: Run notification test
+        run: make notifications
+        env:
+          SOLAR_GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          SOLAR_GMAIL_SENDER: ${{ secrets.GMAIL_SENDER }}
+          SOLAR_RECIPIENT_EMAIL: ${{ secrets.RECIPIENT_EMAIL }}
+          SOLAR_PUSHOVER_USER_KEY: ${{ secrets.PUSHOVER_USER_KEY }}
+          SOLAR_PUSHOVER_API_TOKEN: ${{ secrets.PUSHOVER_API_TOKEN }}
+
+      # Step 10: Verify notification success
+      - name: Verify notification success
+        run: |
+          echo "✅ Notification test completed successfully"
+          echo "Check your email and Pushover app for test notifications"
+
+      # Step 11: Cleanup (always runs, even on failure)
+      - name: Cleanup artifacts
+        if: always()
+        run: |
+          echo "Cleaning up sensitive files..."
+          rm -f solar-forecast
+          rm -f config/application.properties
+          rm -f ~/.solar-forecast/alert_state.json
+          echo "✓ Cleanup complete"
+
+      # Step 12: Upload logs on failure
+      - name: Upload debug logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: failure-logs-${{ github.run_number }}
+          path: |
+            *.log
+          retention-days: 7
+          if-no-files-found: ignore
