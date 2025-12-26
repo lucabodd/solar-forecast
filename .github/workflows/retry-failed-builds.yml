@@ -1,0 +1,56 @@
+name: Retry Failed Builds
+
+# Automatically retry failed builds when Mac runner is offline
+on:
+  schedule:
+    # Run every 30 minutes to check for failed builds
+    - cron: '*/30 * * * *'
+  # Allow manual triggering for testing
+  workflow_dispatch:
+
+permissions:
+  actions: write  # Required to rerun workflows
+  contents: read
+
+jobs:
+  retry-failed:
+    name: Retry Failed Builds from Last 24h
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Find and retry failed builds
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          echo "🔍 Checking for failed 'Build and Verify' workflows in the last 24 hours..."
+
+          # Find failed workflow runs from last 24 hours
+          failed_runs=$(gh run list \
+            --repo ${{ github.repository }} \
+            --workflow=test-notifications.yml \
+            --status=failure \
+            --limit=50 \
+            --json databaseId,createdAt,conclusion,status \
+            --jq '[.[] | select(.createdAt | fromdateiso8601 > (now - 86400))] | .[].databaseId')
+
+          if [ -z "$failed_runs" ]; then
+            echo "✓ No failed builds found in the last 24 hours"
+            exit 0
+          fi
+
+          retry_count=0
+          for run_id in $failed_runs; do
+            echo "🔄 Retrying failed build run #$run_id..."
+            if gh run rerun $run_id --repo ${{ github.repository }} --failed; then
+              echo "✓ Retry triggered for run #$run_id"
+              retry_count=$((retry_count + 1))
+            else
+              echo "⚠️  Could not retry run #$run_id (may have already been retried)"
+            fi
+          done
+
+          if [ $retry_count -gt 0 ]; then
+            echo ""
+            echo "✅ Triggered retry for $retry_count failed build(s)"
+            echo "Builds will run when Mac runner comes back online"
+          fi
