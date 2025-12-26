@@ -179,6 +179,24 @@ func (p *PushoverAdapter) GenerateChartImage(production []domain.SolarProduction
 	dc.Stroke()
 	dc.SetDash() // Reset dash
 
+	// Draw rain probability line (purple, dashed)
+	dc.SetColor(color.RGBA{155, 89, 182, 180})
+	dc.SetLineWidth(3)
+	dc.SetDash(8, 4)
+	maxRain := 100.0
+	for i, prod := range production {
+		x := float64(padding) + xPositions[i]
+		rain := float64(prod.PrecipitationProbability)
+		y := float64(padding+chartHeight) - (rain/maxRain)*float64(chartHeight)
+		if i == 0 {
+			dc.MoveTo(x, y)
+		} else {
+			dc.LineTo(x, y)
+		}
+	}
+	dc.Stroke()
+	dc.SetDash() // Reset dash
+
 	// Find minimum production value for highlighting
 	var minProductionValue float64 = 999999
 	minProductionIndices := []int{}
@@ -254,13 +272,48 @@ func (p *PushoverAdapter) GenerateChartImage(production []domain.SolarProduction
 		}
 	}
 
+	// Add data point labels for rain probability
+	dc.SetColor(color.RGBA{155, 89, 182, 255})
+	for i, prod := range production {
+		rain := float64(prod.PrecipitationProbability)
+		x := float64(padding) + xPositions[i]
+		y := float64(padding+chartHeight) - (rain/maxRain)*float64(chartHeight)
+
+		// Draw dot
+		dc.DrawCircle(x, y, 3)
+		dc.Fill()
+
+		// Draw value label only for daylight hours and only if rain chance > 0
+		if prod.GHI >= p.daylightGHIThreshold && rain > 0 {
+			dc.DrawStringAnchored(fmt.Sprintf("%.0f%%", rain), x, y-10, 0.5, 1)
+		}
+	}
+
+	// Add day change markers (vertical lines at midnight)
+	dc.SetColor(color.RGBA{231, 76, 60, 150}) // Red with transparency
+	dc.SetLineWidth(2)
+	dc.SetDash(5, 3)
+	for i := 0; i < len(production); i++ {
+		if i > 0 && production[i].Hour.Day() != production[i-1].Hour.Day() {
+			x := float64(padding) + xPositions[i]
+			dc.DrawLine(x, float64(padding), x, float64(padding+chartHeight))
+			dc.Stroke()
+			// Add day label
+			dayLabel := production[i].Hour.Format("Jan 2")
+			dc.DrawStringAnchored(dayLabel, x, float64(padding-10), 0.5, 0.5)
+		}
+	}
+	dc.SetDash()    // Reset dash
+	dc.SetLineWidth(4) // Reset line width
+
 	// X-axis labels (time) - daylight hours only
 	dc.SetColor(color.RGBA{44, 62, 80, 255})
 	for i, prod := range production {
 		// Only show time labels during daylight hours
 		if prod.GHI >= p.daylightGHIThreshold {
 			x := float64(padding) + xPositions[i]
-			timeStr := prod.Hour.Format("15:04")
+			// Format time as just hour (e.g., "14" instead of "14:00")
+			timeStr := prod.Hour.Format("15")
 			dc.DrawStringAnchored(timeStr, x, float64(padding+chartHeight+35), 0.5, 0)
 		}
 	}
@@ -271,9 +324,11 @@ func (p *PushoverAdapter) GenerateChartImage(production []domain.SolarProduction
 
 	// Legend
 	dc.SetColor(color.RGBA{247, 147, 30, 255})
-	dc.DrawStringAnchored("● Production (kW)", float64(padding+80), float64(padding-15), 0.5, 0.5)
+	dc.DrawStringAnchored("● Production (kW)", float64(padding+60), float64(padding-15), 0.5, 0.5)
 	dc.SetColor(color.RGBA{52, 152, 219, 255})
-	dc.DrawStringAnchored("● Cloud Coverage (%)", float64(padding+280), float64(padding-15), 0.5, 0.5)
+	dc.DrawStringAnchored("● Cloud Coverage (%)", float64(padding+220), float64(padding-15), 0.5, 0.5)
+	dc.SetColor(color.RGBA{155, 89, 182, 255})
+	dc.DrawStringAnchored("● Rain Chance (%)", float64(padding+400), float64(padding-15), 0.5, 0.5)
 
 	// Encode to PNG
 	var buf bytes.Buffer

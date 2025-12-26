@@ -805,6 +805,7 @@ func (a *GmailAdapter) generateOutputLineChart(production []domain.SolarProducti
 	var productionPoints []float64
 	var maxProduction float64
 	var cloudPoints []float64
+	var rainPoints []float64
 
 	for _, prod := range production {
 		kw := prod.EstimatedOutputKW
@@ -816,6 +817,7 @@ func (a *GmailAdapter) generateOutputLineChart(production []domain.SolarProducti
 			maxProduction = kw
 		}
 		cloudPoints = append(cloudPoints, float64(prod.CloudCover))
+		rainPoints = append(rainPoints, float64(prod.PrecipitationProbability))
 	}
 
 	// Round up maxProduction to nearest 1 kW for cleaner axis
@@ -850,14 +852,17 @@ func (a *GmailAdapter) generateOutputLineChart(production []domain.SolarProducti
                         <style>
                             .output-line { fill: none; stroke: url(#lineGradient); stroke-width: 4; stroke-linecap: round; stroke-linejoin: round; filter: url(#shadow); }
                             .cloud-line { fill: none; stroke: #3498db; stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; opacity: 0.7; stroke-dasharray: 5,5; }
+                            .rain-line { fill: none; stroke: #9b59b6; stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; opacity: 0.7; stroke-dasharray: 8,4; }
                             .output-area { fill: url(#outputGradient); }
                             .chart-grid { stroke: #e0e6ed; stroke-width: 1; }
                             .chart-label { font-size: 12px; fill: #7f8c8d; }
                             .chart-label-right { font-size: 12px; fill: #3498db; }
                             .output-value { font-size: 11px; fill: #FF6B35; font-weight: bold; }
                             .cloud-value { font-size: 10px; fill: #3498db; font-weight: bold; }
+                            .rain-value { font-size: 10px; fill: #9b59b6; font-weight: bold; }
                             .output-dot { fill: #FF6B35; r: 4; }
                             .cloud-dot { fill: #3498db; r: 3; }
+                            .rain-dot { fill: #9b59b6; r: 3; }
                             .legend { font-size: 13px; font-weight: bold; }
                         </style>
                     </defs>
@@ -865,6 +870,7 @@ func (a *GmailAdapter) generateOutputLineChart(production []domain.SolarProducti
                     <!-- Legend -->
                     <text class="legend" x="` + fmt.Sprintf("%d", padding) + `" y="25" fill="#FF6B35">● Production (kW)</text>
                     <text class="legend" x="` + fmt.Sprintf("%d", padding+180) + `" y="25" fill="#3498db">● Cloud Coverage (%)</text>
+                    <text class="legend" x="` + fmt.Sprintf("%d", padding+380) + `" y="25" fill="#9b59b6">● Rain Chance (%)</text>
 
                     <!-- Grid lines -->
 `)
@@ -916,6 +922,20 @@ func (a *GmailAdapter) generateOutputLineChart(production []domain.SolarProducti
 		}
 	}
 
+	// Build rain probability path (using right Y-axis scale, same as cloud)
+	rainPath := ""
+	maxRain := 100.0
+	minRain := 0.0
+	for i, rain := range rainPoints {
+		x := float64(padding) + xPositions[i]
+		y := float64(chartHeight-padding) - ((rain-minRain)/(maxRain-minRain))*float64(chartHeight-2*padding)
+		if i == 0 {
+			rainPath = fmt.Sprintf("M %.1f %.1f", x, y)
+		} else {
+			rainPath += fmt.Sprintf(" L %.1f %.1f", x, y)
+		}
+	}
+
 	// Add area under production curve
 	html.WriteString(fmt.Sprintf(`                    <path class="output-area" d="%s" />
 `, areaPath.String()))
@@ -927,6 +947,10 @@ func (a *GmailAdapter) generateOutputLineChart(production []domain.SolarProducti
 	// Add cloud coverage line
 	html.WriteString(fmt.Sprintf(`                    <path class="cloud-line" d="%s" />
 `, cloudPath))
+
+	// Add rain probability line
+	html.WriteString(fmt.Sprintf(`                    <path class="rain-line" d="%s" />
+`, rainPath))
 
 	// Find minimum production value for highlighting
 	minProductionValue := productionPoints[0]
@@ -984,6 +1008,35 @@ func (a *GmailAdapter) generateOutputLineChart(production []domain.SolarProducti
 		}
 	}
 
+	// Add rain probability dots and labels
+	for i, rain := range rainPoints {
+		x := float64(padding) + xPositions[i]
+		y := float64(chartHeight-padding) - ((rain-minRain)/(maxRain-minRain))*float64(chartHeight-2*padding)
+		html.WriteString(fmt.Sprintf(`                    <circle class="rain-dot" cx="%.1f" cy="%.1f" r="3" />
+`, x, y))
+
+		// Draw label only for daylight hours and only if rain chance > 0
+		if production[i].GHI >= a.daylightGHIThreshold && rain > 0 {
+			html.WriteString(fmt.Sprintf(`                    <text class="rain-value" x="%.1f" y="%.1f" text-anchor="middle">%.0f%%</text>
+`, x, y-12, rain))
+		}
+	}
+
+	// Add day change markers (vertical lines at midnight)
+	html.WriteString(`                    <!-- Day change markers -->
+`)
+	for i := 0; i < len(production); i++ {
+		if i > 0 && production[i].Hour.Day() != production[i-1].Hour.Day() {
+			x := float64(padding) + xPositions[i]
+			html.WriteString(fmt.Sprintf(`                    <line x1="%.1f" y1="%d" x2="%.1f" y2="%d" stroke="#E74C3C" stroke-width="2" stroke-dasharray="5,3" opacity="0.6" />
+`, x, padding, x, chartHeight-padding))
+			// Add day label
+			dayLabel := production[i].Hour.Format("Jan 2")
+			html.WriteString(fmt.Sprintf(`                    <text x="%.1f" y="%d" text-anchor="middle" style="font-size: 10px; fill: #E74C3C; font-weight: bold;">%s</text>
+`, x, padding-5, dayLabel))
+		}
+	}
+
 	// Add x-axis labels (time) - daylight hours only
 	html.WriteString(`                    <!-- X-axis labels -->
 `)
@@ -993,7 +1046,8 @@ func (a *GmailAdapter) generateOutputLineChart(production []domain.SolarProducti
 			// Only show time labels during daylight hours
 			if prod.GHI >= a.daylightGHIThreshold {
 				x := float64(padding) + xPositions[i]
-				timeStr := prod.Hour.Format("15:04")
+				// Format time as just hour (e.g., "14" instead of "14:00")
+				timeStr := prod.Hour.Format("15")
 				html.WriteString(fmt.Sprintf(`                    <text x="%.1f" y="%.0f" text-anchor="middle" style="font-size: 11px; fill: #2c3e50; font-weight: bold;">%s</text>
 `, x, float64(chartHeight-padding+30), timeStr))
 			}

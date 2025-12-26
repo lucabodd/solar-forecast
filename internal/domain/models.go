@@ -104,11 +104,12 @@ type Config struct {
 
 // ForecastHour represents one hour of forecast data
 type ForecastHour struct {
-	Hour                 time.Time
-	Temperature          float64 // Celsius
-	CloudCover           int     // percentage 0-100
+	Hour                       time.Time
+	Temperature                float64 // Celsius
+	CloudCover                 int     // percentage 0-100
 	GlobalHorizontalIrradiance float64 // W/m²
-	RelativeHumidity     int     // percentage 0-100
+	RelativeHumidity           int     // percentage 0-100
+	PrecipitationProbability   int     // percentage 0-100
 }
 
 // ForecastData holds 48-hour forecast
@@ -123,9 +124,10 @@ type SolarProduction struct {
 	OutputPercentage  float64 // percentage of rated capacity
 
 	// Weather context for email rendering
-	CloudCover  int     // percentage 0-100
-	Temperature float64 // Celsius
-	GHI         float64 // W/m² - for condition determination
+	CloudCover               int     // percentage 0-100
+	Temperature              float64 // Celsius
+	GHI                      float64 // W/m² - for condition determination
+	PrecipitationProbability int     // percentage 0-100
 }
 
 // AlertCriteria represents which thresholds were triggered
