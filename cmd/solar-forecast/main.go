@@ -13,6 +13,8 @@ import (
 	"github.com/b0d/solar-forecast/internal/domain"
 )
 
+const version = "1.0.1-test-cache-fix"
+
 func main() {
 	// Parse command line flags
 	configPath := flag.String("config", "config/application.properties", "Path to configuration file")
