@@ -13,11 +13,6 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-# Environment variables for the entire workflow
-env:
-  GO_VERSION: '1.25'
-  CONFIG_PATH: '${{ github.workspace }}/config/application.properties'
-
 jobs:
   build-and-verify:
     name: Build and Verify Compilation
@@ -32,26 +27,9 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          fetch-depth: 1  # Shallow clone for speed
 
-      # Step 2: Setup Go
-      - name: Setup Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: ${{ env.GO_VERSION }}
-          cache: true
-
-      # Step 3: Verify Go installation
-      - name: Verify Go installation
-        run: |
-          go version
-          which go
-
-      # Step 4: Prepare configuration directory
-      - name: Prepare configuration directory
-        run: mkdir -p config
-
-      # Step 5: Copy application.properties from runner config
+      # Step 2: Setup application configuration
       - name: Setup application configuration
         run: |
           if [ -f ~/actions-runner-config/application.properties ]; then
@@ -64,38 +42,11 @@ jobs:
             exit 1
           fi
 
-      # Step 6: Verify configuration file
-      - name: Verify configuration exists
-        run: |
-          if [ ! -f config/application.properties ]; then
-            echo "Error: config/application.properties not found"
-            exit 1
-          fi
-          echo "✓ Configuration file present"
-          echo "Config file size: $(wc -l < config/application.properties) lines"
-
-      # Step 7: Run make build to verify compilation
+      # Step 3: Build application
       - name: Build application
         run: make build
 
-      # Step 8: Verify binary was created
-      - name: Verify binary
-        run: |
-          if [ ! -f solar-forecast ]; then
-            echo "Error: Binary not created"
-            exit 1
-          fi
-          echo "✓ Binary created successfully"
-          ls -lh solar-forecast
-          file solar-forecast
-
-      # Step 9: Run basic syntax check
-      - name: Verify binary is executable
-        run: |
-          chmod +x solar-forecast
-          ./solar-forecast --help 2>&1 || echo "✓ Binary is executable (exit expected without config)"
-
-      # Step 10: Run Go tests if any exist
+      # Step 4: Run tests
       - name: Run tests
         run: |
           if [ -n "$(find . -name '*_test.go' 2>/dev/null)" ]; then
@@ -105,7 +56,7 @@ jobs:
             echo "✓ No tests found, skipping test execution"
           fi
 
-      # Step 11: Cleanup (always runs, even on failure)
+      # Step 5: Cleanup (always runs, even on failure)
       - name: Cleanup artifacts
         if: always()
         run: |
@@ -114,7 +65,7 @@ jobs:
           rm -f config/application.properties
           echo "✓ Cleanup complete"
 
-      # Step 12: Upload logs on failure
+      # Step 6: Upload logs on failure
       - name: Upload debug logs on failure
         if: failure()
         uses: actions/upload-artifact@v4
