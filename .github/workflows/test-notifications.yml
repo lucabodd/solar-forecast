@@ -8,6 +8,11 @@ on:
   # Allow manual workflow dispatch for testing
   workflow_dispatch:
 
+# Cancel in-progress runs when a new one starts
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 # Environment variables for the entire workflow
 env:
   GO_VERSION: '1.25'
@@ -19,8 +24,8 @@ jobs:
     # Run on self-hosted Mac runner with custom label
     runs-on: [self-hosted, macOS, mac-notifications]
 
-    # Timeout after 5 minutes (build is quick)
-    timeout-minutes: 5
+    # Timeout after 30 minutes (allows time for Mac to wake from sleep)
+    timeout-minutes: 30
 
     steps:
       # Step 1: Checkout code
