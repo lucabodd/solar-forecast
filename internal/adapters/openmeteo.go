@@ -29,6 +29,7 @@ type OpenMeteoResponse struct {
 		CloudCover             []int     `json:"cloud_cover"`
 		ShortwaveRadiation     []float64 `json:"shortwave_radiation"`
 		RelativeHumidity2m     []int     `json:"relative_humidity_2m"`
+		PrecipitationProbability []int   `json:"precipitation_probability"`
 	} `json:"hourly"`
 }
 
@@ -47,7 +48,7 @@ func NewOpenMeteoAdapter(config *domain.Config, logger domain.Logger) *OpenMeteo
 // GetForecast fetches 7-day weather forecast from Open-Meteo API with retries
 func (a *OpenMeteoAdapter) GetForecast(ctx context.Context, latitude, longitude float64) (*domain.ForecastData, error) {
 	url := fmt.Sprintf(
-		"https://api.open-meteo.com/v1/forecast?latitude=%.2f&longitude=%.2f&hourly=temperature_2m,cloud_cover,shortwave_radiation,relative_humidity_2m&forecast_days=7&timezone=auto",
+		"https://api.open-meteo.com/v1/forecast?latitude=%.2f&longitude=%.2f&hourly=temperature_2m,cloud_cover,shortwave_radiation,relative_humidity_2m,precipitation_probability&forecast_days=7&timezone=auto",
 		latitude, longitude,
 	)
 
@@ -126,6 +127,9 @@ func (a *OpenMeteoAdapter) buildForecastData(apiResp OpenMeteoResponse) (*domain
 	if len(apiResp.Hourly.RelativeHumidity2m) < minLen {
 		minLen = len(apiResp.Hourly.RelativeHumidity2m)
 	}
+	if len(apiResp.Hourly.PrecipitationProbability) < minLen {
+		minLen = len(apiResp.Hourly.PrecipitationProbability)
+	}
 
 	for i := 0; i < minLen && i < 168; i++ { // Limit to 168 hours (7 days)
 		hour, err := time.Parse("2006-01-02T15:04", apiResp.Hourly.Time[i])
@@ -150,12 +154,21 @@ func (a *OpenMeteoAdapter) buildForecastData(apiResp OpenMeteoResponse) (*domain
 			humidity = 100
 		}
 
+		precipitation := apiResp.Hourly.PrecipitationProbability[i]
+		if precipitation < 0 {
+			precipitation = 0
+		}
+		if precipitation > 100 {
+			precipitation = 100
+		}
+
 		forecast.Hours = append(forecast.Hours, domain.ForecastHour{
-			Hour:                        hour,
-			Temperature:                 apiResp.Hourly.Temperature2m[i],
-			CloudCover:                  cloudCover,
+			Hour:                       hour,
+			Temperature:                apiResp.Hourly.Temperature2m[i],
+			CloudCover:                 cloudCover,
 			GlobalHorizontalIrradiance: apiResp.Hourly.ShortwaveRadiation[i],
-			RelativeHumidity:            humidity,
+			RelativeHumidity:           humidity,
+			PrecipitationProbability:   precipitation,
 		})
 	}
 

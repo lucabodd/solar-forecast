@@ -805,6 +805,7 @@ func (a *GmailAdapter) generateOutputLineChart(production []domain.SolarProducti
 	var productionPoints []float64
 	var maxProduction float64
 	var cloudPoints []float64
+	var precipitationPoints []float64
 
 	for _, prod := range production {
 		kw := prod.EstimatedOutputKW
@@ -816,6 +817,7 @@ func (a *GmailAdapter) generateOutputLineChart(production []domain.SolarProducti
 			maxProduction = kw
 		}
 		cloudPoints = append(cloudPoints, float64(prod.CloudCover))
+		precipitationPoints = append(precipitationPoints, float64(prod.PrecipitationProbability))
 	}
 
 	// Round up maxProduction to nearest 1 kW for cleaner axis
@@ -850,21 +852,25 @@ func (a *GmailAdapter) generateOutputLineChart(production []domain.SolarProducti
                         <style>
                             .output-line { fill: none; stroke: url(#lineGradient); stroke-width: 4; stroke-linecap: round; stroke-linejoin: round; filter: url(#shadow); }
                             .cloud-line { fill: none; stroke: #3498db; stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; opacity: 0.7; stroke-dasharray: 5,5; }
+                            .rain-line { fill: none; stroke: #9b59b6; stroke-width: 2.5; stroke-linecap: round; stroke-linejoin: round; opacity: 0.8; }
                             .output-area { fill: url(#outputGradient); }
                             .chart-grid { stroke: #e0e6ed; stroke-width: 1; }
                             .chart-label { font-size: 12px; fill: #7f8c8d; }
                             .chart-label-right { font-size: 12px; fill: #3498db; }
                             .output-value { font-size: 11px; fill: #FF6B35; font-weight: bold; }
                             .cloud-value { font-size: 10px; fill: #3498db; font-weight: bold; }
+                            .rain-value { font-size: 10px; fill: #9b59b6; font-weight: bold; }
                             .output-dot { fill: #FF6B35; r: 4; }
                             .cloud-dot { fill: #3498db; r: 3; }
+                            .rain-dot { fill: #9b59b6; r: 3; }
                             .legend { font-size: 13px; font-weight: bold; }
                         </style>
                     </defs>
 
                     <!-- Legend -->
                     <text class="legend" x="` + fmt.Sprintf("%d", padding) + `" y="25" fill="#FF6B35">● Production (kW)</text>
-                    <text class="legend" x="` + fmt.Sprintf("%d", padding+180) + `" y="25" fill="#3498db">● Cloud Coverage (%)</text>
+                    <text class="legend" x="` + fmt.Sprintf("%d", padding+180) + `" y="25" fill="#3498db">● Cloud (%)</text>
+                    <text class="legend" x="` + fmt.Sprintf("%d", padding+310) + `" y="25" fill="#9b59b6">● Rain (%)</text>
 
                     <!-- Grid lines -->
 `)
@@ -916,6 +922,20 @@ func (a *GmailAdapter) generateOutputLineChart(production []domain.SolarProducti
 		}
 	}
 
+	// Build precipitation path (using same 0-100% scale as clouds)
+	precipitationPath := ""
+	maxPrecipitation := 100.0
+	minPrecipitation := 0.0
+	for i, rain := range precipitationPoints {
+		x := float64(padding) + xPositions[i]
+		y := float64(chartHeight-padding) - ((rain-minPrecipitation)/(maxPrecipitation-minPrecipitation))*float64(chartHeight-2*padding)
+		if i == 0 {
+			precipitationPath = fmt.Sprintf("M %.1f %.1f", x, y)
+		} else {
+			precipitationPath += fmt.Sprintf(" L %.1f %.1f", x, y)
+		}
+	}
+
 	// Add area under production curve
 	html.WriteString(fmt.Sprintf(`                    <path class="output-area" d="%s" />
 `, areaPath.String()))
@@ -927,6 +947,10 @@ func (a *GmailAdapter) generateOutputLineChart(production []domain.SolarProducti
 	// Add cloud coverage line
 	html.WriteString(fmt.Sprintf(`                    <path class="cloud-line" d="%s" />
 `, cloudPath))
+
+	// Add precipitation line
+	html.WriteString(fmt.Sprintf(`                    <path class="rain-line" d="%s" />
+`, precipitationPath))
 
 	// Find minimum production value for highlighting
 	minProductionValue := productionPoints[0]
@@ -981,6 +1005,20 @@ func (a *GmailAdapter) generateOutputLineChart(production []domain.SolarProducti
 		if production[i].GHI >= a.daylightGHIThreshold {
 			html.WriteString(fmt.Sprintf(`                    <text class="cloud-value" x="%.1f" y="%.1f" text-anchor="middle">%.0f%%</text>
 `, x, y+18, cloud))
+		}
+	}
+
+	// Add precipitation dots and labels
+	for i, rain := range precipitationPoints {
+		x := float64(padding) + xPositions[i]
+		y := float64(chartHeight-padding) - ((rain-minPrecipitation)/(maxPrecipitation-minPrecipitation))*float64(chartHeight-2*padding)
+		html.WriteString(fmt.Sprintf(`                    <circle class="rain-dot" cx="%.1f" cy="%.1f" r="3" />
+`, x, y))
+
+		// Draw label only for daylight hours and when rain probability > 0
+		if production[i].GHI >= a.daylightGHIThreshold && rain > 0 {
+			html.WriteString(fmt.Sprintf(`                    <text class="rain-value" x="%.1f" y="%.1f" text-anchor="middle">%.0f%%</text>
+`, x, y-12, rain))
 		}
 	}
 

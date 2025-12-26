@@ -179,6 +179,22 @@ func (p *PushoverAdapter) GenerateChartImage(production []domain.SolarProduction
 	dc.Stroke()
 	dc.SetDash() // Reset dash
 
+	// Draw precipitation probability line (purple)
+	maxPrecipitation := 100.0
+	dc.SetColor(color.RGBA{155, 89, 182, 200}) // Purple with opacity
+	dc.SetLineWidth(2.5)
+	for i, prod := range production {
+		x := float64(padding) + xPositions[i]
+		rain := float64(prod.PrecipitationProbability)
+		y := float64(padding+chartHeight) - (rain/maxPrecipitation)*float64(chartHeight)
+		if i == 0 {
+			dc.MoveTo(x, y)
+		} else {
+			dc.LineTo(x, y)
+		}
+	}
+	dc.Stroke()
+
 	// Find minimum production value for highlighting
 	var minProductionValue float64 = 999999
 	minProductionIndices := []int{}
@@ -254,6 +270,23 @@ func (p *PushoverAdapter) GenerateChartImage(production []domain.SolarProduction
 		}
 	}
 
+	// Add data point labels for precipitation
+	dc.SetColor(color.RGBA{155, 89, 182, 255})
+	for i, prod := range production {
+		rain := float64(prod.PrecipitationProbability)
+		x := float64(padding) + xPositions[i]
+		y := float64(padding+chartHeight) - (rain/maxPrecipitation)*float64(chartHeight)
+
+		// Draw dot
+		dc.DrawCircle(x, y, 3)
+		dc.Fill()
+
+		// Draw value label only for daylight hours and when rain probability > 0
+		if prod.GHI >= p.daylightGHIThreshold && rain > 0 {
+			dc.DrawStringAnchored(fmt.Sprintf("%.0f%%", rain), x, y-10, 0.5, 1)
+		}
+	}
+
 	// Day change markers
 	var previousDay int
 	for i, prod := range production {
@@ -289,13 +322,15 @@ func (p *PushoverAdapter) GenerateChartImage(production []domain.SolarProduction
 
 	// Title
 	dc.SetColor(color.RGBA{44, 62, 80, 255})
-	dc.DrawStringAnchored("Solar Production & Cloud Coverage (Next 48h)", float64(width/2), 25, 0.5, 0.5)
+	dc.DrawStringAnchored("Solar Production, Cloud & Rain Forecast (Next 48h)", float64(width/2), 25, 0.5, 0.5)
 
 	// Legend
 	dc.SetColor(color.RGBA{247, 147, 30, 255})
-	dc.DrawStringAnchored("● Production (kW)", float64(padding+80), float64(padding-15), 0.5, 0.5)
+	dc.DrawStringAnchored("● Production (kW)", float64(padding+50), float64(padding-15), 0.5, 0.5)
 	dc.SetColor(color.RGBA{52, 152, 219, 255})
-	dc.DrawStringAnchored("● Cloud Coverage (%)", float64(padding+280), float64(padding-15), 0.5, 0.5)
+	dc.DrawStringAnchored("● Cloud (%)", float64(padding+200), float64(padding-15), 0.5, 0.5)
+	dc.SetColor(color.RGBA{155, 89, 182, 255})
+	dc.DrawStringAnchored("● Rain (%)", float64(padding+310), float64(padding-15), 0.5, 0.5)
 
 	// Encode to PNG
 	var buf bytes.Buffer
