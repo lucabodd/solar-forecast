@@ -350,10 +350,11 @@ func (s *SolarForecastService) findRecoveryInExtendedForecast(allDaylightProduct
 // calculateSolarProduction estimates solar output for a given hour
 func (s *SolarForecastService) calculateSolarProduction(hour ForecastHour) SolarProduction {
 	prod := SolarProduction{
-		Hour:        hour.Hour,
-		CloudCover:  hour.CloudCover,
-		Temperature: hour.Temperature,
-		GHI:         hour.GlobalHorizontalIrradiance,
+		Hour:                     hour.Hour,
+		CloudCover:               hour.CloudCover,
+		Temperature:              hour.Temperature,
+		GHI:                      hour.GlobalHorizontalIrradiance,
+		PrecipitationProbability: hour.PrecipitationProbability,
 	}
 
 	// Formula: P_out = P_rated × (GHI/1000) × η_inverter × temp_adjustment
