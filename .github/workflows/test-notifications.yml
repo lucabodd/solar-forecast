@@ -37,11 +37,15 @@ jobs:
             exit 1
           fi
 
-      # Step 3: Build application
+      # Step 3: Clear Go build cache (force fresh build)
+      - name: Clear Go build cache
+        run: go clean -cache -modcache -testcache
+
+      # Step 4: Build application
       - name: Build application
         run: make build
 
-      # Step 4: Run tests
+      # Step 5: Run tests
       - name: Run tests
         run: |
           if [ -n "$(find . -name '*_test.go' 2>/dev/null)" ]; then
@@ -51,7 +55,7 @@ jobs:
             echo "✓ No tests found, skipping test execution"
           fi
 
-      # Step 5: Cleanup (always runs, even on failure)
+      # Step 6: Cleanup (always runs, even on failure)
       - name: Cleanup artifacts
         if: always()
         run: |
@@ -60,7 +64,7 @@ jobs:
           rm -f config/application.properties
           echo "✓ Cleanup complete"
 
-      # Step 6: Upload logs on failure
+      # Step 7: Upload logs on failure
       - name: Upload debug logs on failure
         if: failure()
         uses: actions/upload-artifact@v4
