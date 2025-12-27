@@ -59,10 +59,11 @@ jobs:
             echo "✓ No changes to binary, skipping commit"
           else
             echo "📦 Binary changed, committing..."
+            BUILD_DATE=$(date -u '+%Y-%m-%d %H:%M:%S UTC')
             git commit -m "build: update binary [skip ci]
 
 Binary built from commit ${{ github.sha }}
-Built on: $(date -u '+%Y-%m-%d %H:%M:%S UTC')
+Built on: ${BUILD_DATE}
 
 🤖 Automated build by GitHub Actions"
 
