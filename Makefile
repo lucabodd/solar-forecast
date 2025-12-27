@@ -32,18 +32,19 @@ config-check:
 # Build the binary
 build: config-check
 	@echo "Building solar-forecast..."
-	go build -o solar-forecast ./cmd/solar-forecast
-	@echo "✓ Built successfully: solar-forecast"
+	@mkdir -p bin
+	go build -o bin/solar-forecast ./cmd/solar-forecast
+	@echo "✓ Built successfully: bin/solar-forecast"
 
 # Run the application
 run: build
 	@echo "Running solar-forecast..."
-	./solar-forecast -config config/application.properties
+	./bin/solar-forecast -config config/application.properties
 
 # Run with debug logging
 run-debug: build
 	@echo "Running solar-forecast with debug logging..."
-	./solar-forecast -config config/application.properties -debug
+	./bin/solar-forecast -config config/application.properties -debug
 
 # Test email alert with lowered thresholds
 notifications: build
@@ -53,14 +54,14 @@ notifications: build
 	@echo "✓ Alert state cleared"
 	@echo ""
 	@echo "Running with test mode (threshold: 5.0 kW, duration: 1 hour)..."
-	SOLAR_TEST_MODE=1 ./solar-forecast -config config/application.properties -debug
+	SOLAR_TEST_MODE=1 ./bin/solar-forecast -config config/application.properties -debug
 	@echo ""
 	@echo "✅ Done! Check your email and Pushover notifications."
 
 # Clean build artifacts
 clean:
 	@echo "Cleaning..."
-	rm -f solar-forecast
+	rm -rf bin
 	@echo "✓ Clean complete"
 
 # Run tests
