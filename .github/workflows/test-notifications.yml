@@ -60,13 +60,10 @@ jobs:
           else
             echo "📦 Binary changed, committing..."
             BUILD_DATE=$(date -u '+%Y-%m-%d %H:%M:%S UTC')
-            git commit -m "build: update binary [skip ci]
-
-Binary built from commit ${{ github.sha }}
-Built on: ${BUILD_DATE}
-
-🤖 Automated build by GitHub Actions"
-
+            git commit -m "build: update binary [skip ci]" \
+                       -m "Binary built from commit ${{ github.sha }}" \
+                       -m "Built on: ${BUILD_DATE}" \
+                       -m "🤖 Automated build by GitHub Actions"
             git push
             echo "✅ Binary committed and pushed"
           fi
