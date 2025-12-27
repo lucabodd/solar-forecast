@@ -88,20 +88,20 @@ cron-install:
 	@echo ""
 	@read -p "Enter the full path to solar-forecast binary (default: $(PWD)/bin/solar-forecast): " BINARY; \
 	BINARY=$${BINARY:-$(PWD)/bin/solar-forecast}; \
-	@read -p "Enter config file path (default: $(PWD)/config/application.properties): " CONFIG; \
+	read -p "Enter config file path (default: $(PWD)/config/application.properties): " CONFIG; \
 	CONFIG=$${CONFIG:-$(PWD)/config/application.properties}; \
-	@read -p "Enter log file path (default: ~/var/log/solar-forecast.log): " LOG; \
+	read -p "Enter log file path (default: ~/var/log/solar-forecast.log): " LOG; \
 	LOG=$${LOG:-~/var/log/solar-forecast.log}; \
-	@echo ""; \
-	@echo "Creating cron entry..."; \
-	@echo ""; \
-	@echo "Cron job: 0 6-18 * * * $$BINARY -config $$CONFIG >> $$LOG 2>&1"; \
-	@echo ""; \
-	@echo "This will run: hourly from 6am to 6pm, every day"; \
-	@echo ""; \
-	(crontab -l 2>/dev/null; echo "0 6-18 * * * $$BINARY -config $$CONFIG >> $$LOG 2>&1") | crontab -; \
-	@echo "✓ Cron job installed successfully!"; \
-	@echo ""; \
-	@echo "To verify: crontab -l"; \
-	@echo "To remove: crontab -e (then delete the line)"; \
-	@mkdir -p ~/var/log
+	echo ""; \
+	echo "Creating cron entry..."; \
+	echo ""; \
+	echo "Cron job: 0 5-23 * * * $$BINARY -config $$CONFIG >> $$LOG 2>&1"; \
+	echo ""; \
+	echo "This will run: hourly from 5am to 11pm, every day"; \
+	echo ""; \
+	(crontab -l 2>/dev/null; echo "0 5-23 * * * $$BINARY -config $$CONFIG >> $$LOG 2>&1") | crontab -; \
+	echo "✓ Cron job installed successfully!"; \
+	echo ""; \
+	echo "To verify: crontab -l"; \
+	echo "To remove: crontab -e (then delete the line)"; \
+	mkdir -p ~/var/log
