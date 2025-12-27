@@ -436,10 +436,14 @@ func (s *SolarForecastService) shouldSendAlert(ctx context.Context) (bool, error
 	// Check if currently in daytime window (skip check in test mode)
 	now := time.Now()
 	if !s.config.TestMode {
-		currentHour := now.Hour()
+		// Calculate sunrise/sunset for today based on coordinates
+		sunrise, sunset := CalculateSunriseSunset(now, s.config.Latitude, s.config.Longitude)
 
-		if currentHour < s.config.DaytimeStartHour || currentHour >= s.config.DaytimeEndHour {
-			s.logger.Debug("Outside daytime hours, skipping alert", "hour", currentHour, "start", s.config.DaytimeStartHour, "end", s.config.DaytimeEndHour)
+		if now.Before(sunrise) || now.After(sunset) {
+			s.logger.Debug("Outside daylight hours, skipping alert",
+				"current", now.Format("15:04"),
+				"sunrise", sunrise.Format("15:04"),
+				"sunset", sunset.Format("15:04"))
 			return false, nil
 		}
 	}

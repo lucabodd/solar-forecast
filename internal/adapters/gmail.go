@@ -14,23 +14,27 @@ import (
 
 // GmailAdapter implements EmailNotifier using Gmail SMTP
 type GmailAdapter struct {
-	senderEmail          string
-	senderPassword       string
-	recipientEmail       string
-	logger               domain.Logger
-	alertThresholdKW     float64 // Store threshold for color coding in emails
-	daylightGHIThreshold float64 // Store GHI threshold for daylight detection
+	senderEmail            string
+	senderPassword         string
+	recipientEmail         string
+	logger                 domain.Logger
+	alertThresholdKW       float64 // Store threshold for color coding in emails
+	daylightGHIThreshold   float64 // Store GHI threshold for daylight detection
+	nightCompressionFactor float64 // Compression factor for nighttime hours in charts
+	chartDisplayHours      int     // Hours to display in charts
 }
 
 // NewGmailAdapter creates a new Gmail adapter
 func NewGmailAdapter(config *domain.Config, logger domain.Logger) *GmailAdapter {
 	return &GmailAdapter{
-		senderEmail:          config.GmailSender,
-		senderPassword:       config.GmailAppPassword,
-		recipientEmail:       config.RecipientEmail,
-		logger:               logger,
-		alertThresholdKW:     config.ProductionAlertThresholdKW,
-		daylightGHIThreshold: config.DaylightGHIThreshold,
+		senderEmail:            config.GmailSender,
+		senderPassword:         config.GmailAppPassword,
+		recipientEmail:         config.RecipientEmail,
+		logger:                 logger,
+		alertThresholdKW:       config.ProductionAlertThresholdKW,
+		daylightGHIThreshold:   config.DaylightGHIThreshold,
+		nightCompressionFactor: config.NightCompressionFactor,
+		chartDisplayHours:      config.ChartDisplayHours,
 	}
 }
 
@@ -740,8 +744,7 @@ func filterFromNow(hours []domain.SolarProduction, count int) []domain.SolarProd
 }
 
 // calculateSmartSpacing calculates non-uniform X positions that compress nighttime hours
-func calculateSmartSpacing(production []domain.SolarProduction, totalWidth float64, daylightGHIThreshold float64) []float64 {
-	nightCompressionFactor := domain.NightCompressionFactor // Night hours take 20% of day hour spacing
+func calculateSmartSpacing(production []domain.SolarProduction, totalWidth float64, daylightGHIThreshold float64, nightCompressionFactor float64) []float64 {
 
 	// Calculate total "weighted" hours
 	var totalWeightedHours float64
@@ -781,7 +784,7 @@ func (a *GmailAdapter) generateOutputLineChart(production []domain.SolarProducti
 	})
 
 	// Filter to next N hours from current time
-	production = filterFromNow(production, domain.ChartHoursLimit)
+	production = filterFromNow(production, a.chartDisplayHours)
 
 	// Debug: log time range
 	if a.logger != nil && len(production) > 0 {
@@ -894,7 +897,7 @@ func (a *GmailAdapter) generateOutputLineChart(production []domain.SolarProducti
 
 	// Calculate smart point spacing (compress nighttime hours)
 	totalChartWidth := float64(chartWidth - 2*padding)
-	xPositions := calculateSmartSpacing(production, totalChartWidth, a.daylightGHIThreshold)
+	xPositions := calculateSmartSpacing(production, totalChartWidth, a.daylightGHIThreshold, a.nightCompressionFactor)
 
 	// Build production path
 	productionPath := fmt.Sprintf("M %d %d", padding, chartHeight-padding)
@@ -964,10 +967,15 @@ func (a *GmailAdapter) generateOutputLineChart(production []domain.SolarProducti
 		}
 	}
 
-	// Add production points and labels
+	// Add production points and labels (daylight hours only)
 	for i, point := range productionPoints {
 		x := float64(padding) + xPositions[i]
 		y := float64(chartHeight-padding) - ((point-minProduction)/(maxProduction-minProduction))*float64(chartHeight-2*padding)
+
+		// Skip dots and labels for nighttime hours
+		if production[i].GHI < a.daylightGHIThreshold {
+			continue
+		}
 
 		// Check if this is a minimum point
 		isMinimum := false
@@ -987,36 +995,42 @@ func (a *GmailAdapter) generateOutputLineChart(production []domain.SolarProducti
 `, x, y))
 		}
 
-		// Draw label only for daylight hours
-		if production[i].GHI >= a.daylightGHIThreshold {
-			html.WriteString(fmt.Sprintf(`                    <text class="output-value" x="%.1f" y="%.1f" text-anchor="middle">%.1f kW</text>
+		// Draw label for daylight hours
+		html.WriteString(fmt.Sprintf(`                    <text class="output-value" x="%.1f" y="%.1f" text-anchor="middle">%.1f kW</text>
 `, x, y-12, point))
-		}
 	}
 
-	// Add cloud coverage dots and labels
+	// Add cloud coverage dots and labels (daylight hours only)
 	for i, cloud := range cloudPoints {
+		// Skip dots and labels for nighttime hours
+		if production[i].GHI < a.daylightGHIThreshold {
+			continue
+		}
+
 		x := float64(padding) + xPositions[i]
 		y := float64(chartHeight-padding) - ((cloud-minCloud)/(maxCloud-minCloud))*float64(chartHeight-2*padding)
 		html.WriteString(fmt.Sprintf(`                    <circle class="cloud-dot" cx="%.1f" cy="%.1f" r="4" />
 `, x, y))
 
-		// Draw label only for daylight hours
-		if production[i].GHI >= a.daylightGHIThreshold {
-			html.WriteString(fmt.Sprintf(`                    <text class="cloud-value" x="%.1f" y="%.1f" text-anchor="middle">%.0f%%</text>
+		// Draw label for daylight hours
+		html.WriteString(fmt.Sprintf(`                    <text class="cloud-value" x="%.1f" y="%.1f" text-anchor="middle">%.0f%%</text>
 `, x, y+18, cloud))
-		}
 	}
 
-	// Add rain probability dots and labels
+	// Add rain probability dots and labels (daylight hours only)
 	for i, rain := range rainPoints {
+		// Skip dots and labels for nighttime hours
+		if production[i].GHI < a.daylightGHIThreshold {
+			continue
+		}
+
 		x := float64(padding) + xPositions[i]
 		y := float64(chartHeight-padding) - ((rain-minRain)/(maxRain-minRain))*float64(chartHeight-2*padding)
 		html.WriteString(fmt.Sprintf(`                    <circle class="rain-dot" cx="%.1f" cy="%.1f" r="3" />
 `, x, y))
 
-		// Draw label only for daylight hours and only if rain chance > 0
-		if production[i].GHI >= a.daylightGHIThreshold && rain > 0 {
+		// Draw label only if rain chance > 0
+		if rain > 0 {
 			html.WriteString(fmt.Sprintf(`                    <text class="rain-value" x="%.1f" y="%.1f" text-anchor="middle">%.0f%%</text>
 `, x, y-12, rain))
 		}

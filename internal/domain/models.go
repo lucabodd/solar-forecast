@@ -16,14 +16,20 @@ const (
 	// DefaultDaylightGHIThreshold is the minimum GHI to consider as daylight (W/m²)
 	DefaultDaylightGHIThreshold = 50.0
 
-	// ChartHoursLimit is the maximum hours to display in charts
-	ChartHoursLimit = 48
-
-	// NightCompressionFactor reduces spacing for nighttime hours in charts
-	NightCompressionFactor = 0.2
-
 	// MinChartProductionScale ensures chart Y-axis has reasonable scale (kW)
 	MinChartProductionScale = 2.0
+)
+
+// Default values for configurable options
+const (
+	// DefaultChartDisplayHours is the default hours to show in charts
+	DefaultChartDisplayHours = 48
+
+	// DefaultAlertAnalysisHours is the default hours to analyze for alerts
+	DefaultAlertAnalysisHours = 24
+
+	// DefaultNightCompressionFactor reduces spacing for nighttime hours in charts
+	DefaultNightCompressionFactor = 0.05
 )
 
 // Logger defines the interface for logging
@@ -102,12 +108,15 @@ type Config struct {
 	RecipientEmail   string
 
 	// Pushover push notifications
-	PushoverUserKey   string
-	PushoverAPIToken  string
+	PushoverUserKey  string
+	PushoverAPIToken string
 
-	// Cron
-	DaytimeStartHour int // hour 0-23
-	DaytimeEndHour   int // hour 0-23
+	// Analysis periods
+	ChartDisplayHours  int // Hours to display in graphs (default: 48)
+	AlertAnalysisHours int // Hours to analyze for alert conditions (default: 24)
+
+	// Chart settings
+	NightCompressionFactor float64 // Compression for nighttime hours (default: 0.05)
 
 	// API retry
 	APIRetryAttempts     int

@@ -36,8 +36,9 @@ func LoadConfig(configPath string) (*domain.Config, error) {
 		RatedCapacityKW:            5.0,
 		InverterEfficiency:         0.97,
 		TempCoefficient:            -0.4,
-		DaytimeStartHour:           6,
-		DaytimeEndHour:             18,
+		ChartDisplayHours:          domain.DefaultChartDisplayHours,
+		AlertAnalysisHours:         domain.DefaultAlertAnalysisHours,
+		NightCompressionFactor:     domain.DefaultNightCompressionFactor,
 		APIRetryAttempts:           3,
 		APIRetryDelaySeconds:       5,
 		APITimeoutSeconds:          10,
@@ -107,13 +108,21 @@ func LoadConfig(configPath string) (*domain.Config, error) {
 			config.GmailSender = value
 		case "recipient_email":
 			config.RecipientEmail = value
-		case "daytime_start_hour":
+		// daytime_start_hour and daytime_end_hour are deprecated
+		// sunrise/sunset is now calculated automatically from coordinates
+		case "daytime_start_hour", "daytime_end_hour":
+			// Ignored - kept for backwards compatibility
+		case "chart_display_hours":
 			if v, err := strconv.Atoi(value); err == nil {
-				config.DaytimeStartHour = v
+				config.ChartDisplayHours = v
 			}
-		case "daytime_end_hour":
+		case "alert_analysis_hours":
 			if v, err := strconv.Atoi(value); err == nil {
-				config.DaytimeEndHour = v
+				config.AlertAnalysisHours = v
+			}
+		case "night_compression_factor":
+			if v, err := strconv.ParseFloat(value, 64); err == nil {
+				config.NightCompressionFactor = v
 			}
 		case "api_retry_attempts":
 			if v, err := strconv.Atoi(value); err == nil {
@@ -177,6 +186,15 @@ func LoadConfig(configPath string) (*domain.Config, error) {
 	}
 	if config.DaylightGHIThreshold < 0 {
 		return nil, fmt.Errorf("daylight_ghi_threshold must be non-negative, got %.2f", config.DaylightGHIThreshold)
+	}
+	if config.ChartDisplayHours < 1 {
+		return nil, fmt.Errorf("chart_display_hours must be at least 1, got %d", config.ChartDisplayHours)
+	}
+	if config.AlertAnalysisHours < 1 {
+		return nil, fmt.Errorf("alert_analysis_hours must be at least 1, got %d", config.AlertAnalysisHours)
+	}
+	if config.NightCompressionFactor < 0 || config.NightCompressionFactor > 1 {
+		return nil, fmt.Errorf("night_compression_factor must be between 0 and 1, got %.2f", config.NightCompressionFactor)
 	}
 
 	return config, nil

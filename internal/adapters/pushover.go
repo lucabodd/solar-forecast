@@ -18,25 +18,28 @@ import (
 
 // PushoverAdapter implements PushNotifier using Pushover API
 type PushoverAdapter struct {
-	userKey              string
-	apiToken             string
-	logger               domain.Logger
-	daylightGHIThreshold float64
+	userKey                string
+	apiToken               string
+	logger                 domain.Logger
+	daylightGHIThreshold   float64
+	nightCompressionFactor float64 // Compression factor for nighttime hours in charts
+	chartDisplayHours      int     // Hours to display in charts
 }
 
 // NewPushoverAdapter creates a new Pushover adapter
 func NewPushoverAdapter(config *domain.Config, logger domain.Logger) *PushoverAdapter {
 	return &PushoverAdapter{
-		userKey:              config.PushoverUserKey,
-		apiToken:             config.PushoverAPIToken,
-		logger:               logger,
-		daylightGHIThreshold: config.DaylightGHIThreshold,
+		userKey:                config.PushoverUserKey,
+		apiToken:               config.PushoverAPIToken,
+		logger:                 logger,
+		daylightGHIThreshold:   config.DaylightGHIThreshold,
+		nightCompressionFactor: config.NightCompressionFactor,
+		chartDisplayHours:      config.ChartDisplayHours,
 	}
 }
 
 // calculateSmartSpacingPNG calculates non-uniform X positions that compress nighttime hours for PNG charts
-func calculateSmartSpacingPNG(production []domain.SolarProduction, totalWidth float64, daylightGHIThreshold float64) []float64 {
-	nightCompressionFactor := domain.NightCompressionFactor // Night hours take 20% of day hour spacing
+func calculateSmartSpacingPNG(production []domain.SolarProduction, totalWidth float64, daylightGHIThreshold float64, nightCompressionFactor float64) []float64 {
 
 	// Calculate total "weighted" hours
 	var totalWeightedHours float64
@@ -72,7 +75,7 @@ func (p *PushoverAdapter) GenerateChartImage(production []domain.SolarProduction
 	sort.Slice(production, func(i, j int) bool {
 		return production[i].Hour.Before(production[j].Hour)
 	})
-	production = filterFromNow(production, domain.ChartHoursLimit)
+	production = filterFromNow(production, p.chartDisplayHours)
 
 	// Debug: log time range
 	if len(production) > 0 {
@@ -142,7 +145,7 @@ func (p *PushoverAdapter) GenerateChartImage(production []domain.SolarProduction
 
 	// Calculate smart point spacing (compress nighttime hours)
 	totalChartWidth := float64(chartWidth - padding)
-	xPositions := calculateSmartSpacingPNG(production, totalChartWidth, p.daylightGHIThreshold)
+	xPositions := calculateSmartSpacingPNG(production, totalChartWidth, p.daylightGHIThreshold, p.nightCompressionFactor)
 
 	// Draw production line (orange)
 	dc.SetColor(color.RGBA{247, 147, 30, 255})
@@ -213,8 +216,13 @@ func (p *PushoverAdapter) GenerateChartImage(production []domain.SolarProduction
 		}
 	}
 
-	// Add data point labels for production
+	// Add data point labels for production (daylight hours only)
 	for i, prod := range production {
+		// Skip dots and labels for nighttime hours
+		if prod.GHI < p.daylightGHIThreshold {
+			continue
+		}
+
 		kw := prod.EstimatedOutputKW
 		if kw < 0 {
 			kw = 0
@@ -233,14 +241,14 @@ func (p *PushoverAdapter) GenerateChartImage(production []domain.SolarProduction
 
 		// Draw dot with highlighting for minimum
 		if isMinimum {
-			dc.SetColor(color.RGBA{231, 76, 60, 255})   // Red
+			dc.SetColor(color.RGBA{231, 76, 60, 255}) // Red
 			dc.DrawCircle(x, y, 8)
 			dc.Fill()
-			dc.SetColor(color.RGBA{192, 57, 43, 255})   // Dark red border
+			dc.SetColor(color.RGBA{192, 57, 43, 255}) // Dark red border
 			dc.DrawCircle(x, y, 8)
 			dc.SetLineWidth(2)
 			dc.Stroke()
-			dc.SetLineWidth(4) // Reset
+			dc.SetLineWidth(4)                        // Reset
 			dc.SetColor(color.RGBA{247, 147, 30, 255}) // Reset to orange
 		} else {
 			dc.SetColor(color.RGBA{247, 147, 30, 255})
@@ -248,16 +256,19 @@ func (p *PushoverAdapter) GenerateChartImage(production []domain.SolarProduction
 			dc.Fill()
 		}
 
-		// Draw value label only for daylight hours
-		if prod.GHI >= p.daylightGHIThreshold {
-			dc.SetColor(color.RGBA{247, 147, 30, 255})
-			dc.DrawStringAnchored(fmt.Sprintf("%.1f", kw), x, y-10, 0.5, 1)
-		}
+		// Draw value label for daylight hours
+		dc.SetColor(color.RGBA{247, 147, 30, 255})
+		dc.DrawStringAnchored(fmt.Sprintf("%.1f", kw), x, y-10, 0.5, 1)
 	}
 
-	// Add data point labels for cloud coverage
+	// Add data point labels for cloud coverage (daylight hours only)
 	dc.SetColor(color.RGBA{52, 152, 219, 255})
 	for i, prod := range production {
+		// Skip dots and labels for nighttime hours
+		if prod.GHI < p.daylightGHIThreshold {
+			continue
+		}
+
 		cloud := float64(prod.CloudCover)
 		x := float64(padding) + xPositions[i]
 		y := float64(padding+chartHeight) - (cloud/maxCloud)*float64(chartHeight)
@@ -266,15 +277,18 @@ func (p *PushoverAdapter) GenerateChartImage(production []domain.SolarProduction
 		dc.DrawCircle(x, y, 3)
 		dc.Fill()
 
-		// Draw value label only for daylight hours
-		if prod.GHI >= p.daylightGHIThreshold {
-			dc.DrawStringAnchored(fmt.Sprintf("%.0f%%", cloud), x, y+15, 0.5, 0)
-		}
+		// Draw value label for daylight hours
+		dc.DrawStringAnchored(fmt.Sprintf("%.0f%%", cloud), x, y+15, 0.5, 0)
 	}
 
-	// Add data point labels for rain probability
+	// Add data point labels for rain probability (daylight hours only)
 	dc.SetColor(color.RGBA{155, 89, 182, 255})
 	for i, prod := range production {
+		// Skip dots and labels for nighttime hours
+		if prod.GHI < p.daylightGHIThreshold {
+			continue
+		}
+
 		rain := float64(prod.PrecipitationProbability)
 		x := float64(padding) + xPositions[i]
 		y := float64(padding+chartHeight) - (rain/maxRain)*float64(chartHeight)
@@ -283,8 +297,8 @@ func (p *PushoverAdapter) GenerateChartImage(production []domain.SolarProduction
 		dc.DrawCircle(x, y, 3)
 		dc.Fill()
 
-		// Draw value label only for daylight hours and only if rain chance > 0
-		if prod.GHI >= p.daylightGHIThreshold && rain > 0 {
+		// Draw value label only if rain chance > 0
+		if rain > 0 {
 			dc.DrawStringAnchored(fmt.Sprintf("%.0f%%", rain), x, y-10, 0.5, 1)
 		}
 	}
