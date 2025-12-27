@@ -36,7 +36,7 @@ func NewPushoverAdapter(config *domain.Config, logger domain.Logger) *PushoverAd
 
 // calculateSmartSpacingPNG calculates non-uniform X positions that compress nighttime hours for PNG charts
 func calculateSmartSpacingPNG(production []domain.SolarProduction, totalWidth float64, daylightGHIThreshold float64) []float64 {
-	const nightCompressionFactor = 0.2 // Night hours take 20% of day hour spacing
+	nightCompressionFactor := domain.NightCompressionFactor // Night hours take 20% of day hour spacing
 
 	// Calculate total "weighted" hours
 	var totalWeightedHours float64
@@ -68,11 +68,11 @@ func calculateSmartSpacingPNG(production []domain.SolarProduction, totalWidth fl
 
 // GenerateChartImage creates a PNG image of the production and cloud coverage chart
 func (p *PushoverAdapter) GenerateChartImage(production []domain.SolarProduction) ([]byte, error) {
-	// Sort and filter to next 48 hours from now
+	// Sort and filter to next N hours from now
 	sort.Slice(production, func(i, j int) bool {
 		return production[i].Hour.Before(production[j].Hour)
 	})
-	production = filterFromNow(production, 48)
+	production = filterFromNow(production, domain.ChartHoursLimit)
 
 	// Debug: log time range
 	if len(production) > 0 {
@@ -107,8 +107,8 @@ func (p *PushoverAdapter) GenerateChartImage(production []domain.SolarProduction
 		}
 	}
 	maxProduction = float64(int(maxProduction) + 1)
-	if maxProduction < 2 {
-		maxProduction = 2
+	if maxProduction < domain.MinChartProductionScale {
+		maxProduction = domain.MinChartProductionScale
 	}
 
 	chartWidth := width - padding

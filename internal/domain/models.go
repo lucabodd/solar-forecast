@@ -5,6 +5,27 @@ import (
 	"time"
 )
 
+// Solar calculation constants
+const (
+	// STCIrradiance is the Standard Test Condition reference irradiance (W/m²)
+	STCIrradiance = 1000.0
+
+	// STCTemperature is the Standard Test Condition reference temperature (°C)
+	STCTemperature = 25.0
+
+	// DefaultDaylightGHIThreshold is the minimum GHI to consider as daylight (W/m²)
+	DefaultDaylightGHIThreshold = 50.0
+
+	// ChartHoursLimit is the maximum hours to display in charts
+	ChartHoursLimit = 48
+
+	// NightCompressionFactor reduces spacing for nighttime hours in charts
+	NightCompressionFactor = 0.2
+
+	// MinChartProductionScale ensures chart Y-axis has reasonable scale (kW)
+	MinChartProductionScale = 2.0
+)
+
 // Logger defines the interface for logging
 type Logger interface {
 	Info(msg string, args ...interface{})
@@ -67,16 +88,11 @@ type Config struct {
 	ProductionAlertThresholdKW float64 // Alert if production drops below this (kW)
 	DurationThresholdHours     int     // Alert if threshold exceeded for this many consecutive hours
 
-	// Analysis window
-	AnalysisWindowStart int // hour 0-23
-	AnalysisWindowEnd   int // hour 0-23
-
-	// Daylight detection
+	// Daylight detection (replaces fixed analysis window)
 	DaylightGHIThreshold float64 // GHI threshold in W/m² to consider as daylight (typically 50-100)
 
 	// Panel configuration
 	RatedCapacityKW    float64 // Rated output at STC (already includes panel efficiency)
-	PanelEfficiency    float64 // DEPRECATED - not used (rated capacity already accounts for this)
 	InverterEfficiency float64 // DC to AC conversion efficiency (0.95-0.98)
 	TempCoefficient    float64 // Temperature coefficient in % per °C (typically -0.4 to -0.5)
 

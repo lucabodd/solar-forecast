@@ -32,18 +32,15 @@ func LoadConfig(configPath string) (*domain.Config, error) {
 		// Set defaults
 		ProductionAlertThresholdKW: 2.0,
 		DurationThresholdHours:     6,
-		AnalysisWindowStart:        10,
-		AnalysisWindowEnd:          16,
-		DaylightGHIThreshold:       50.0,
-		RatedCapacityKW:           5.0,
-		PanelEfficiency:           0.20,
-		InverterEfficiency:        0.97,
-		TempCoefficient:           -0.4,
-		DaytimeStartHour:          6,
-		DaytimeEndHour:            18,
-		APIRetryAttempts:          3,
-		APIRetryDelaySeconds:      5,
-		APITimeoutSeconds:         10,
+		DaylightGHIThreshold:       domain.DefaultDaylightGHIThreshold,
+		RatedCapacityKW:            5.0,
+		InverterEfficiency:         0.97,
+		TempCoefficient:            -0.4,
+		DaytimeStartHour:           6,
+		DaytimeEndHour:             18,
+		APIRetryAttempts:           3,
+		APIRetryDelaySeconds:       5,
+		APITimeoutSeconds:          10,
 	}
 
 	scanner := bufio.NewScanner(file)
@@ -85,14 +82,8 @@ func LoadConfig(configPath string) (*domain.Config, error) {
 			if v, err := strconv.Atoi(value); err == nil {
 				config.DurationThresholdHours = v
 			}
-		case "analysis_window_start":
-			if v, err := strconv.Atoi(value); err == nil {
-				config.AnalysisWindowStart = v
-			}
-		case "analysis_window_end":
-			if v, err := strconv.Atoi(value); err == nil {
-				config.AnalysisWindowEnd = v
-			}
+		// analysis_window_start and analysis_window_end are deprecated
+		// daylight detection now uses GHI threshold instead of fixed hours
 		case "daylight_ghi_threshold":
 			if v, err := strconv.ParseFloat(value, 64); err == nil {
 				config.DaylightGHIThreshold = v
@@ -101,12 +92,7 @@ func LoadConfig(configPath string) (*domain.Config, error) {
 			if v, err := strconv.ParseFloat(value, 64); err == nil {
 				config.RatedCapacityKW = v
 			}
-		case "panel_efficiency":
-			if v, err := strconv.ParseFloat(value, 64); err == nil {
-				config.PanelEfficiency = v
-				// Note: This value is deprecated and not used in calculations
-				// The rated capacity already includes panel efficiency
-			}
+		// panel_efficiency is deprecated - rated_capacity_kw already includes it
 		case "inverter_efficiency":
 			if v, err := strconv.ParseFloat(value, 64); err == nil {
 				config.InverterEfficiency = v
@@ -165,8 +151,32 @@ func LoadConfig(configPath string) (*domain.Config, error) {
 	if config.RecipientEmail == "" || strings.Contains(config.RecipientEmail, "recipient@example.com") {
 		return nil, fmt.Errorf("recipient_email not configured - please set in config file or SOLAR_RECIPIENT_EMAIL env var")
 	}
-	if config.Latitude == 0 || config.Longitude == 0 {
+	// Validate coordinates
+	if config.Latitude == 0 && config.Longitude == 0 {
 		return nil, fmt.Errorf("latitude and longitude must be configured")
+	}
+	if config.Latitude < -90 || config.Latitude > 90 {
+		return nil, fmt.Errorf("latitude must be between -90 and 90, got %.6f", config.Latitude)
+	}
+	if config.Longitude < -180 || config.Longitude > 180 {
+		return nil, fmt.Errorf("longitude must be between -180 and 180, got %.6f", config.Longitude)
+	}
+
+	// Validate numeric thresholds
+	if config.ProductionAlertThresholdKW <= 0 {
+		return nil, fmt.Errorf("production_alert_threshold_kw must be positive, got %.2f", config.ProductionAlertThresholdKW)
+	}
+	if config.DurationThresholdHours < 1 {
+		return nil, fmt.Errorf("duration_threshold_hours must be at least 1, got %d", config.DurationThresholdHours)
+	}
+	if config.RatedCapacityKW <= 0 {
+		return nil, fmt.Errorf("rated_capacity_kw must be positive, got %.2f", config.RatedCapacityKW)
+	}
+	if config.InverterEfficiency <= 0 || config.InverterEfficiency > 1 {
+		return nil, fmt.Errorf("inverter_efficiency must be between 0 and 1, got %.2f", config.InverterEfficiency)
+	}
+	if config.DaylightGHIThreshold < 0 {
+		return nil, fmt.Errorf("daylight_ghi_threshold must be non-negative, got %.2f", config.DaylightGHIThreshold)
 	}
 
 	return config, nil

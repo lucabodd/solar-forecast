@@ -372,12 +372,14 @@ func (s *SolarForecastService) calculateSolarProduction(hour ForecastHour) Solar
 	//
 	// Reference GHI is 1000 W/m² (STC)
 
-	// Normalize GHI to reference (1000 W/m²)
-	ghiFactor := hour.GlobalHorizontalIrradiance / 1000.0
+	// Normalize GHI to reference (STC = 1000 W/m²)
+	ghiFactor := hour.GlobalHorizontalIrradiance / STCIrradiance
 
-	// Temperature adjustment (efficiency decreases with temperature)
-	// Assuming reference temp of 25°C
-	tempAdjustment := 1.0 - (s.config.TempCoefficient / 100.0 * (hour.Temperature - 25.0))
+	// Temperature adjustment (efficiency decreases with temperature above STC reference of 25°C)
+	// TempCoefficient is typically -0.4 to -0.5 (%/°C)
+	// At 45°C (20° above ref): 1.0 + (-0.4/100 * 20) = 0.92 (8% loss) ✓
+	// At 5°C (20° below ref): 1.0 + (-0.4/100 * -20) = 1.08 (8% gain) ✓
+	tempAdjustment := 1.0 + (s.config.TempCoefficient / 100.0 * (hour.Temperature - STCTemperature))
 
 	// Calculate output (panel_efficiency removed - already included in rated capacity)
 	prod.EstimatedOutputKW = s.config.RatedCapacityKW *

@@ -389,17 +389,17 @@ func (a *GmailAdapter) generateHTMLBody(analysis *domain.AlertAnalysis) string {
 	if analysis.CriteriaTriggered.LowProductionDurationTriggered {
 		html.WriteString(fmt.Sprintf(`
                 <div class="metric triggered">
-                    <div class="metric-label">⚡ Production < 2kW</div>
+                    <div class="metric-label">⚡ Production < %.1fkW</div>
                     <div class="metric-value">%d HOURS</div>
                 </div>
-`, analysis.ConsecutiveHourCount))
+`, a.alertThresholdKW, analysis.ConsecutiveHourCount))
 	} else {
-		html.WriteString(`
+		html.WriteString(fmt.Sprintf(`
                 <div class="metric">
-                    <div class="metric-label">⚡ Production < 2kW</div>
+                    <div class="metric-label">⚡ Production < %.1fkW</div>
                     <div class="metric-value">✓ OK</div>
                 </div>
-`)
+`, a.alertThresholdKW))
 	}
 
 	// Recovery forecast metric
@@ -524,7 +524,7 @@ func (a *GmailAdapter) generateCloudCoverLineChart(hours []domain.ForecastHour) 
 		html.WriteString(fmt.Sprintf(`                    <line class="chart-grid" x1="%d" y1="%.0f" x2="%d" y2="%.0f" />
 `, padding, y, chartWidth-padding, y))
 		value := maxValue - (float64(i)/4.0)*(maxValue-minValue)
-		html.WriteString(fmt.Sprintf(`                    <text class="chart-label" x="%d" y="%.0f" text-anchor="end">%.1f kWh</text>
+		html.WriteString(fmt.Sprintf(`                    <text class="chart-label" x="%d" y="%.0f" text-anchor="end">%.1f kW</text>
 `, padding-10, y+4, value))
 	}
 
@@ -578,7 +578,7 @@ func (a *GmailAdapter) generateCloudCoverLineChart(hours []domain.ForecastHour) 
 	}
 
 	// Add x-axis line
-	html.WriteString(fmt.Sprintf(`                    <line class="chart-grid" x1="%d" y1="%.0f" x2="%d" y2="%.0f" />
+	html.WriteString(fmt.Sprintf(`                    <line class="chart-grid" x1="%d" y1="%d" x2="%d" y2="%d" />
 `, padding, chartHeight-padding, chartWidth-padding, chartHeight-padding))
 
 	html.WriteString(`
@@ -710,7 +710,7 @@ func (a *GmailAdapter) generateGHILineChart(hours []domain.ForecastHour) string 
 	}
 
 	// Add x-axis line
-	html.WriteString(fmt.Sprintf(`                    <line class="chart-grid" x1="%d" y1="%.0f" x2="%d" y2="%.0f" />
+	html.WriteString(fmt.Sprintf(`                    <line class="chart-grid" x1="%d" y1="%d" x2="%d" y2="%d" />
 `, padding, chartHeight-padding, chartWidth-padding, chartHeight-padding))
 
 	html.WriteString(`
@@ -741,7 +741,7 @@ func filterFromNow(hours []domain.SolarProduction, count int) []domain.SolarProd
 
 // calculateSmartSpacing calculates non-uniform X positions that compress nighttime hours
 func calculateSmartSpacing(production []domain.SolarProduction, totalWidth float64, daylightGHIThreshold float64) []float64 {
-	const nightCompressionFactor = 0.2 // Night hours take 20% of day hour spacing
+	nightCompressionFactor := domain.NightCompressionFactor // Night hours take 20% of day hour spacing
 
 	// Calculate total "weighted" hours
 	var totalWeightedHours float64
@@ -780,8 +780,8 @@ func (a *GmailAdapter) generateOutputLineChart(production []domain.SolarProducti
 		return production[i].Hour.Before(production[j].Hour)
 	})
 
-	// Filter to next 48 hours from current time
-	production = filterFromNow(production, 48)
+	// Filter to next N hours from current time
+	production = filterFromNow(production, domain.ChartHoursLimit)
 
 	// Debug: log time range
 	if a.logger != nil && len(production) > 0 {
@@ -821,9 +821,9 @@ func (a *GmailAdapter) generateOutputLineChart(production []domain.SolarProducti
 	}
 
 	// Round up maxProduction to nearest 1 kW for cleaner axis
-	maxProduction = float64(int(maxProduction)+1)
-	if maxProduction < 2 {
-		maxProduction = 2 // Minimum scale of 2 kW
+	maxProduction = float64(int(maxProduction) + 1)
+	if maxProduction < domain.MinChartProductionScale {
+		maxProduction = domain.MinChartProductionScale // Minimum scale for readable chart
 	}
 	minProduction := float64(0)
 
@@ -1055,7 +1055,7 @@ func (a *GmailAdapter) generateOutputLineChart(production []domain.SolarProducti
 	}
 
 	// Add x-axis line
-	html.WriteString(fmt.Sprintf(`                    <line class="chart-grid" x1="%d" y1="%.0f" x2="%d" y2="%.0f" />
+	html.WriteString(fmt.Sprintf(`                    <line class="chart-grid" x1="%d" y1="%d" x2="%d" y2="%d" />
 `, padding, chartHeight-padding, chartWidth-padding, chartHeight-padding))
 
 	html.WriteString(`
