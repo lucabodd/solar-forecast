@@ -60,11 +60,26 @@ pushover_user_key=YOUR_PUSHOVER_USER_KEY
 pushover_api_token=YOUR_PUSHOVER_API_TOKEN
 
 # ========================================
-# CRON SCHEDULING
+# DAYLIGHT DETECTION
 # ========================================
-# Daytime check window (24-hour format, 0-23)
-daytime_start_hour=8
-daytime_end_hour=20
+# GHI threshold for daylight detection (W/m²)
+# Hours with GHI below this are considered nighttime
+# Default: 50 W/m²
+daylight_ghi_threshold=50
+
+# ========================================
+# CHART & ANALYSIS SETTINGS
+# ========================================
+# Hours to display in charts (default: 48)
+chart_display_hours=48
+
+# Hours to analyze for alert conditions (default: 24)
+alert_analysis_hours=24
+
+# Nighttime compression factor for charts (0.0-1.0)
+# Lower values compress nighttime hours more
+# Default: 0.05 (night hours take 5% of day hour spacing)
+night_compression_factor=0.05
 
 # ========================================
 # API CONFIGURATION
