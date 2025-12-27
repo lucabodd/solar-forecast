@@ -72,7 +72,7 @@ test:
 # Install to system
 install: build
 	@echo "Installing solar-forecast to /usr/local/bin..."
-	sudo cp solar-forecast /usr/local/bin/
+	sudo cp bin/solar-forecast /usr/local/bin/
 	@echo "✓ Installed to /usr/local/bin/solar-forecast"
 	@echo ""
 	@echo "Next steps:"
