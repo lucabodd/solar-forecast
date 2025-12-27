@@ -45,7 +45,15 @@ jobs:
       - name: Build application
         run: make build
 
-      # Step 5: Run tests
+      # Step 5: Copy binary to local workspace
+      - name: Copy binary to local workspace
+        run: |
+          LOCAL_BIN=~/Workspace/repos/solar-forecast/bin
+          mkdir -p "$LOCAL_BIN"
+          cp bin/solar-forecast "$LOCAL_BIN/"
+          echo "✓ Binary copied to $LOCAL_BIN/solar-forecast"
+
+      # Step 6: Run tests
       - name: Run tests
         run: |
           if [ -n "$(find . -name '*_test.go' 2>/dev/null)" ]; then
@@ -55,7 +63,7 @@ jobs:
             echo "✓ No tests found, skipping test execution"
           fi
 
-      # Step 6: Cleanup (always runs, even on failure)
+      # Step 7: Cleanup (always runs, even on failure)
       - name: Cleanup artifacts
         if: always()
         run: |
@@ -63,7 +71,7 @@ jobs:
           rm -f config/application.properties
           echo "✓ Cleanup complete"
 
-      # Step 7: Upload logs on failure
+      # Step 8: Upload logs on failure
       - name: Upload debug logs on failure
         if: failure()
         uses: actions/upload-artifact@v4
