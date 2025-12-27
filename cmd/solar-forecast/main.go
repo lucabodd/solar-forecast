@@ -13,7 +13,7 @@ import (
 	"github.com/b0d/solar-forecast/internal/domain"
 )
 
-const version = "1.0.3"
+const version = "1.0.4"
 
 func main() {
 	// Parse command line flags
