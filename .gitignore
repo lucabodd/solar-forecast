@@ -1,7 +1,8 @@
 # Ignore binary in root (old location)
 /solar-forecast
 
-# Build artifacts (except bin/ directory which is committed)
+# Build artifacts
+bin/
 *.log
 .DS_Store
 state/

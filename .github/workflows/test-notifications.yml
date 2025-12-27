@@ -45,30 +45,7 @@ jobs:
       - name: Build application
         run: make build
 
-      # Step 5: Commit binary to repository
-      - name: Commit built binary
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-
-          # Add the binary
-          git add bin/solar-forecast
-
-          # Check if there are changes to commit
-          if git diff --staged --quiet; then
-            echo "✓ No changes to binary, skipping commit"
-          else
-            echo "📦 Binary changed, committing..."
-            BUILD_DATE=$(date -u '+%Y-%m-%d %H:%M:%S UTC')
-            git commit -m "build: update binary [skip ci]" \
-                       -m "Binary built from commit ${{ github.sha }}" \
-                       -m "Built on: ${BUILD_DATE}" \
-                       -m "🤖 Automated build by GitHub Actions"
-            git push
-            echo "✅ Binary committed and pushed"
-          fi
-
-      # Step 6: Run tests
+      # Step 5: Run tests
       - name: Run tests
         run: |
           if [ -n "$(find . -name '*_test.go' 2>/dev/null)" ]; then
@@ -78,7 +55,7 @@ jobs:
             echo "✓ No tests found, skipping test execution"
           fi
 
-      # Step 7: Cleanup (always runs, even on failure)
+      # Step 6: Cleanup (always runs, even on failure)
       - name: Cleanup artifacts
         if: always()
         run: |
@@ -86,7 +63,7 @@ jobs:
           rm -f config/application.properties
           echo "✓ Cleanup complete"
 
-      # Step 8: Upload logs on failure
+      # Step 7: Upload logs on failure
       - name: Upload debug logs on failure
         if: failure()
         uses: actions/upload-artifact@v4
