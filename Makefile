@@ -86,10 +86,10 @@ cron-install:
 	@echo ""
 	@echo "This will set up an hourly cron job during daytime hours."
 	@echo ""
-	@read -p "Enter the full path to solar-forecast binary (default: /usr/local/bin/solar-forecast): " BINARY; \
-	BINARY=$${BINARY:-/usr/local/bin/solar-forecast}; \
-	@read -p "Enter config file path (default: ~/Workspace/repos/solar-forecast/config/application.properties): " CONFIG; \
-	CONFIG=$${CONFIG:-~/Workspace/repos/solar-forecast/config/application.properties}; \
+	@read -p "Enter the full path to solar-forecast binary (default: $(PWD)/bin/solar-forecast): " BINARY; \
+	BINARY=$${BINARY:-$(PWD)/bin/solar-forecast}; \
+	@read -p "Enter config file path (default: $(PWD)/config/application.properties): " CONFIG; \
+	CONFIG=$${CONFIG:-$(PWD)/config/application.properties}; \
 	@read -p "Enter log file path (default: ~/var/log/solar-forecast.log): " LOG; \
 	LOG=$${LOG:-~/var/log/solar-forecast.log}; \
 	@echo ""; \
