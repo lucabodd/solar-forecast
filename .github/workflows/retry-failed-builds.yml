@@ -3,8 +3,8 @@ name: Retry Failed Builds
 # Automatically retry failed builds when Mac runner is offline
 on:
   schedule:
-    # Run every 30 minutes to check for failed builds
-    - cron: '*/30 * * * *'
+    # Run every 2 hours to check for failed builds
+    - cron: '0 */2 * * *'
   # Allow manual triggering for testing
   workflow_dispatch:
 
