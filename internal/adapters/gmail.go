@@ -394,9 +394,9 @@ func (a *GmailAdapter) generateHTMLBody(analysis *domain.AlertAnalysis) string {
 		html.WriteString(fmt.Sprintf(`
                 <div class="metric triggered">
                     <div class="metric-label">⚡ Production < %.1fkW</div>
-                    <div class="metric-value">%d HOURS</div>
+                    <div class="metric-value">%d/%d HOURS</div>
                 </div>
-`, a.alertThresholdKW, analysis.ConsecutiveHourCount))
+`, a.alertThresholdKW, analysis.ConsecutiveHourCount, analysis.TotalDaylightHours))
 	} else {
 		html.WriteString(fmt.Sprintf(`
                 <div class="metric">

@@ -171,6 +171,9 @@ type AlertAnalysis struct {
 	LastLowProductionHour  time.Time         // End of low production period
 	RecommendedAction      string
 
+	// Daylight hours tracking (within analysis period)
+	TotalDaylightHours int // Total daylight hours in the analysis period
+
 	// Recovery tracking
 	RecoveryHour       time.Time // When production rises above threshold
 	HoursUntilRecovery int       // Total duration from start to recovery
