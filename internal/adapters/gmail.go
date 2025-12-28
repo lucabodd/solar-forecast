@@ -854,26 +854,26 @@ func (a *GmailAdapter) generateOutputLineChart(production []domain.SolarProducti
                         </filter>
                         <style>
                             .output-line { fill: none; stroke: url(#lineGradient); stroke-width: 4; stroke-linecap: round; stroke-linejoin: round; filter: url(#shadow); }
-                            .cloud-line { fill: none; stroke: #3498db; stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; opacity: 0.7; stroke-dasharray: 5,5; }
-                            .rain-line { fill: none; stroke: #9b59b6; stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; opacity: 0.7; stroke-dasharray: 8,4; }
+                            .cloud-line { fill: none; stroke: #9b59b6; stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; opacity: 0.7; stroke-dasharray: 5,5; }
+                            .rain-line { fill: none; stroke: #3498db; stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; opacity: 0.7; stroke-dasharray: 8,4; }
                             .output-area { fill: url(#outputGradient); }
                             .chart-grid { stroke: #e0e6ed; stroke-width: 1; }
                             .chart-label { font-size: 12px; fill: #7f8c8d; }
-                            .chart-label-right { font-size: 12px; fill: #3498db; }
+                            .chart-label-right { font-size: 12px; fill: #9b59b6; }
                             .output-value { font-size: 11px; fill: #FF6B35; font-weight: bold; }
-                            .cloud-value { font-size: 10px; fill: #3498db; font-weight: bold; }
-                            .rain-value { font-size: 10px; fill: #9b59b6; font-weight: bold; }
+                            .cloud-value { font-size: 10px; fill: #9b59b6; font-weight: bold; }
+                            .rain-value { font-size: 10px; fill: #3498db; font-weight: bold; }
                             .output-dot { fill: #FF6B35; r: 4; }
-                            .cloud-dot { fill: #3498db; r: 3; }
-                            .rain-dot { fill: #9b59b6; r: 3; }
+                            .cloud-dot { fill: #9b59b6; r: 3; }
+                            .rain-dot { fill: #3498db; r: 3; }
                             .legend { font-size: 13px; font-weight: bold; }
                         </style>
                     </defs>
 
                     <!-- Legend -->
                     <text class="legend" x="` + fmt.Sprintf("%d", padding) + `" y="25" fill="#FF6B35">● Production (kW)</text>
-                    <text class="legend" x="` + fmt.Sprintf("%d", padding+180) + `" y="25" fill="#3498db">● Cloud Coverage (%)</text>
-                    <text class="legend" x="` + fmt.Sprintf("%d", padding+380) + `" y="25" fill="#9b59b6">● Rain Chance (%)</text>
+                    <text class="legend" x="` + fmt.Sprintf("%d", padding+180) + `" y="25" fill="#9b59b6">● Cloud Coverage (%)</text>
+                    <text class="legend" x="` + fmt.Sprintf("%d", padding+380) + `" y="25" fill="#3498db">● Rain Chance (%)</text>
 
                     <!-- Grid lines -->
 `)
