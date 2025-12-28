@@ -188,6 +188,9 @@ func (s *SolarForecastService) analyzeForecast(forecast *ForecastData) *AlertAna
 		return analysis
 	}
 
+	// Track total daylight hours in the analysis period
+	analysis.TotalDaylightHours = len(windowHours)
+
 	// Calculate solar production for daylight hours only (for alert analysis)
 	productionData := make([]SolarProduction, len(windowHours))
 	for i, hour := range windowHours {
